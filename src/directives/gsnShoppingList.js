@@ -230,6 +230,7 @@
               };
 
               $scope.doAddOwnItem = function () {
+                var list = $scope.mylist;
                 var addString = gsnApi.isNull($scope.addString, '');
                 if (addString.length < 1) {
                   return;
@@ -240,21 +241,6 @@
 
                 // refresh list
                 $scope.doMassageList(list);
-              };
-
-              $scope.doRemoveSelected = function () {
-                var list = $scope.mylist;
-                var toRemove = [];
-                angular.forEach(list.items, function (v, k) {
-                  if (v.selected) {
-                    toRemove.push(v);
-                  }
-                });
-
-                list.removeItems(toRemove).then(function () {
-                  // refresh list
-                  $scope.doMassageList(list);
-                });
               };
 
               $scope.doSaveList = function (newTitle) {
@@ -376,18 +362,18 @@
 
               // trigger modal
               $scope.$on('gsnevent:gcprinter-not-supported', function() {
-                $scope.printer.blocked++;
+                $scope.printer.notsupported++;
               });
               $scope.$on('gsnevent:gcprinter-blocked', function() {
-                $scope.printer.notsupported++;
+                $scope.printer.blocked++;
               });
               $scope.$on('gsnevent:gcprinter-not-found', function() {
                 $scope.printer.notinstalled++;
               });
-              $scope.$on('gsnevent:gcprinter-printed', function(e, rsp) {
+              $scope.$on('gsnevent:gcprinter-printed', function(evt, e, rsp) {
                 $scope.printer.printed = e;
                 if (rsp) {
-                  $scope.printer.errors = gsnApi.isNull(response.ErrorCoupons, []);
+                  $scope.printer.errors = gsnApi.isNull(rsp.ErrorCoupons, []);
                   var count = $scope.printer.total - $scope.printer.errors.length;
                   if (count > 0) {
                     $scope.printer.count = count;

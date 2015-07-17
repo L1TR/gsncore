@@ -1,15 +1,17 @@
 ﻿(function (angular, undefined) {
   'use strict';
   var serviceId = 'gsnStore';
-  angular.module('gsn.core').service(serviceId, ['$rootScope', '$http', 'gsnApi', '$q', '$window', '$timeout', '$sessionStorage', '$localStorage', '$location', gsnStore]);
+  angular.module('gsn.core').service(serviceId, ['$rootScope', '$http', 'gsnApi', '$q', '$timeout', '$location', gsnStore]);
 
-  function gsnStore($rootScope, $http, gsnApi, $q, $window, $timeout, $sessionStorage, $localStorage, $location) {
+  function gsnStore($rootScope, $http, gsnApi, $q, $timeout, $location) {
     var returnObj = {};
 
     $rootScope[serviceId] = returnObj;
+    gsnApi.gsn.$store = returnObj;
 
     // cache current user selection
-    var $localCache = {
+    var _lc = {
+      previousGetStore: null,
       manufacturerCoupons: {},
       instoreCoupons: {},
       youtechCoupons: {},
@@ -26,15 +28,13 @@
       adPods: {},
       specialAttributes: {},
       circular: null,
-      storeList: null,
-      rewardProfile: {},
       allVideos: []
     };
 
     var betterStorage = {};
 
     // cache current processed circular data
-    var $circularProcessed = {
+    var _cp = {
       circularByTypeId: {},
       categoryById: {},
       itemsById: {},
@@ -45,62 +45,61 @@
       lastProcessDate: 0    // number represent a date in month
     };
 
-    var $previousGetStore,
-        processingQueue = [];
+    var processingQueue = [];
 
     // get circular by type id
     returnObj.getCircular = function (circularTypeId) {
-      var result = $circularProcessed.circularByTypeId[circularTypeId];
+      var result = _cp.circularByTypeId[circularTypeId];
       return result;
     };
 
     // get all categories
     returnObj.getCategories = function () {
-      return $circularProcessed.categoryById;
+      return _cp.categoryById;
     };
 
     // get inventory categories
     returnObj.getInventoryCategories = function () {
       var url = gsnApi.getStoreUrl() + '/GetInventoryCategories/' + gsnApi.getChainId() + '/' + gsnApi.getSelectedStoreId();
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     // get sale item categories
     returnObj.getSaleItemCategories = function () {
       var url = gsnApi.getStoreUrl() + '/GetSaleItemCategories/' + gsnApi.getChainId() + '/' + gsnApi.getSelectedStoreId();
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     // refresh current store circular
     returnObj.refreshCircular = function () {
-      if ($localCache.circularIsLoading) return;
+      if (_lc.circularIsLoading) return;
       var config = gsnApi.getConfig();
       if (config.AllContent) {
-        $localCache.circularIsLoading = true;
+        _lc.circularIsLoading = true;
         processCircularData(function(){
-          $localCache.circularIsLoading = false;
+          _lc.circularIsLoading = false;
         });
         return;
       }
 
-      $localCache.storeId = gsnApi.getSelectedStoreId();
-      if ($localCache.storeId <= 0 ) return;
+      _lc.storeId = gsnApi.getSelectedStoreId();
+      if (_lc.storeId <= 0 ) return;
 
-      $localCache.circular = {};
-      $localCache.circularIsLoading = true;
+      _lc.circular = {};
+      _lc.circularIsLoading = true;
       $rootScope.$broadcast("gsnevent:circular-loading");
 
-      var url = gsnApi.getStoreUrl() + '/AllContent/' + $localCache.storeId;
-      gsnApi.httpGetOrPostWithCache({}, url).then(function (rst) {
+      var url = gsnApi.getStoreUrl() + '/AllContent/' + _lc.storeId;
+      gsnApi.http({}, url).then(function (rst) {
         if (rst.success) {
-          $localCache.circular = rst.response;
+          _lc.circular = rst.response;
           betterStorage.circular = rst.response;
 
           // resolve is done inside of method below
           processCircularData();
-          $localCache.circularIsLoading = false;
+          _lc.circularIsLoading = false;
         } else {
-          $localCache.circularIsLoading = false;
+          _lc.circularIsLoading = false;
           $rootScope.$broadcast("gsnevent:circular-failed", rst);
         }
       });
@@ -109,45 +108,45 @@
 
     returnObj.searchProducts = function (searchTerm) {
       var url = gsnApi.getStoreUrl() + '/SearchProduct/' + gsnApi.getSelectedStoreId() + '?q=' + encodeURIComponent(searchTerm);
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.searchRecipes = function (searchTerm) {
       var url = gsnApi.getStoreUrl() + '/SearchRecipe/' + gsnApi.getChainId() + '?q=' + encodeURIComponent(searchTerm);
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.getAvailableVarieties = function (circularItemId) {
       var url = gsnApi.getStoreUrl() + '/GetAvailableVarieties/' + circularItemId;
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.getQuickSearchItems = function () {
       var url = gsnApi.getStoreUrl() + '/GetQuickSearchItems/' + gsnApi.getChainId();
-      return gsnApi.httpGetOrPostWithCache($localCache.quickSearchItems, url);
+      return gsnApi.http(_lc.quickSearchItems, url);
     };
 
     // get all stores from cache
     returnObj.getStores = function () {
       var deferred = $q.defer();
-      if (gsnApi.isNull($previousGetStore, null) !== null) {
-        return $previousGetStore.promise;
+      if (gsnApi.isNull(_lc.previousGetStore, null) !== null) {
+        return _lc.previousGetStore.promise;
       }
 
-      $previousGetStore = deferred;
+      _lc.previousGetStore = deferred;
       var storeList = betterStorage.storeList;
       if (gsnApi.isNull(storeList, []).length > 0) {
         $timeout(function () {
-          $previousGetStore = null;
-          deferred.resolve({ success: true, response: storeList });
+          _lc.previousGetStore = null;
           parseStoreList(storeList);
+          deferred.resolve({ success: true, response: storeList });
         }, 10);
       } else {
         $rootScope.$broadcast("gsnevent:storelist-loading");
         gsnApi.getAccessToken().then(function () {
           var url = gsnApi.getStoreUrl() + '/List/' + gsnApi.getChainId();
           $http.get(url, { headers: gsnApi.getApiHeaders() }).success(function (response) {
-            $previousGetStore = null;
+            _lc.previousGetStore = null;
             var stores = response;
             parseStoreList(stores, true);
             deferred.resolve({ success: true, response: stores });
@@ -173,74 +172,74 @@
 
     // get item by id
     returnObj.getItem = function (id) {
-      var result = $circularProcessed.itemsById[id];
+      var result = _cp.itemsById[id];
       return (gsn.isNull(result, null) !== null) ? result : null;
     };
 
     returnObj.getAskTheChef = function () {
       var url = gsnApi.getStoreUrl() + '/FeaturedArticle/' + gsnApi.getChainId() + '/1';
-      return gsnApi.httpGetOrPostWithCache($localCache.faAskTheChef, url);
+      return gsnApi.http(_lc.faAskTheChef, url);
     };
 
     returnObj.getFeaturedArticle = function () {
       var url = gsnApi.getStoreUrl() + '/FeaturedArticle/' + gsnApi.getChainId() + '/2';
-      return gsnApi.httpGetOrPostWithCache($localCache.faArticle, url);
+      return gsnApi.http(_lc.faArticle, url);
     };
 
     returnObj.getFeaturedVideo = function () {
       var url = gsnApi.getStoreUrl() + '/FeaturedVideo/' + gsnApi.getChainId();
-      return gsnApi.httpGetOrPostWithCache($localCache.faVideo, url);
+      return gsnApi.http(_lc.faVideo, url);
     };
 
     returnObj.getRecipeVideos = function() {
       var url = gsnApi.getStoreUrl() + '/RecipeVideos/' + gsnApi.getChainId();
-      return gsnApi.httpGetOrPostWithCache($localCache.allVideos, url);
+      return gsnApi.http(_lc.allVideos, url);
     };
 
     returnObj.getCookingTip = function () {
       var url = gsnApi.getStoreUrl() + '/FeaturedArticle/' + gsnApi.getChainId() + '/3';
-      return gsnApi.httpGetOrPostWithCache($localCache.faCookingTip, url);
+      return gsnApi.http(_lc.faCookingTip, url);
     };
 
     returnObj.getTopRecipes = function () {
       var url = gsnApi.getStoreUrl() + '/TopRecipes/' + gsnApi.getChainId() + '/' + 50;
-      return gsnApi.httpGetOrPostWithCache($localCache.topRecipes, url);
+      return gsnApi.http(_lc.topRecipes, url);
     };
 
     returnObj.getFeaturedRecipe = function () {
       var url = gsnApi.getStoreUrl() + '/FeaturedRecipe/' + gsnApi.getChainId();
-      return gsnApi.httpGetOrPostWithCache($localCache.faRecipe, url);
+      return gsnApi.http(_lc.faRecipe, url);
     };
 
     returnObj.getCoupon = function (couponId, couponType) {
-      return couponType == 2 ? $circularProcessed.manuCouponById[couponId] : (couponType == 10 ? $circularProcessed.storeCouponById[couponId] : $circularProcessed.youtechCouponById[couponId]);
+      return couponType == 2 ? _cp.manuCouponById[couponId] : (couponType == 10 ? _cp.storeCouponById[couponId] : _cp.youtechCouponById[couponId]);
     };
 
     returnObj.getManufacturerCoupons = function () {
-      return $localCache.manufacturerCoupons;
+      return _lc.manufacturerCoupons;
     };
 
     returnObj.getManufacturerCouponTotalSavings = function () {
       var url = gsnApi.getStoreUrl() + '/GetManufacturerCouponTotalSavings/' + gsnApi.getChainId();
-      return gsnApi.httpGetOrPostWithCache($localCache.manuCouponTotalSavings, url);
+      return gsnApi.http(_lc.manuCouponTotalSavings, url);
     };
 
     returnObj.getStates = function () {
       var url = gsnApi.getStoreUrl() + '/GetStates';
-      return gsnApi.httpGetOrPostWithCache($localCache.states, url);
+      return gsnApi.http(_lc.states, url);
     };
 
     returnObj.getInstoreCoupons = function () {
-      return $localCache.instoreCoupons;
+      return _lc.instoreCoupons;
     };
 
     returnObj.getYoutechCoupons = function () {
-      return $localCache.youtechCoupons;
+      return _lc.youtechCoupons;
     };
 
     returnObj.getRecipe = function (recipeId) {
       var url = gsnApi.getStoreUrl() + '/RecipeBy/' + recipeId;
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.getStaticContent = function (contentName) {
@@ -251,53 +250,44 @@
       }
       url += '?name=' + encodeURIComponent(contentName);
 
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.getPartial = function (contentName) {
       var url = gsnApi.getContentServiceUrl('GetPartial');
       url += '?name=' + encodeURIComponent(contentName);
 
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.getArticle = function (articleId) {
       var url = gsnApi.getStoreUrl() + '/ArticleBy/' + articleId;
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.getSaleItems = function (departmentId, categoryId) {
       var url = gsnApi.getStoreUrl() + '/FilterSaleItem/' + gsnApi.getSelectedStoreId() + '?' + 'departmentId=' + gsnApi.isNull(departmentId, '') + '&categoryId=' + gsnApi.isNull(categoryId, '');
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.getInventory = function (departmentId, categoryId) {
       var url = gsnApi.getStoreUrl() + '/FilterInventory/' + gsnApi.getSelectedStoreId() + '?' + 'departmentId=' + gsnApi.isNull(departmentId, '') + '&categoryId=' + gsnApi.isNull(categoryId, '');
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.getSpecialAttributes = function () {
       var url = gsnApi.getStoreUrl() + '/GetSpecialAttributes/' + gsnApi.getChainId();
-      return gsnApi.httpGetOrPostWithCache($localCache.specialAttributes, url);
+      return gsnApi.http(_lc.specialAttributes, url);
     };
 
     returnObj.getMealPlannerRecipes = function () {
       var url = gsnApi.getStoreUrl() + '/GetMealPlannerRecipes/' + gsnApi.getChainId();
-      return gsnApi.httpGetOrPostWithCache($localCache.mealPlanners, url);
+      return gsnApi.http(_lc.mealPlanners, url);
     };
 
     returnObj.getAdPods = function () {
       var url = gsnApi.getStoreUrl() + '/ListSlots/' + gsnApi.getChainId();
-      return gsnApi.httpGetOrPostWithCache($localCache.adPods, url);
-    };
-
-    // similar to getStores except the data is from cache
-    returnObj.getStoreList = function () {
-      if (gsnApi.isNull($localCache.storeList, null) === null) {
-        $localCache.storeList = betterStorage.storeList;
-      }
-
-      return $localCache.storeList;
+      return gsnApi.http(_lc.adPods, url);
     };
 
     returnObj.hasCompleteCircular = function () {
@@ -316,24 +306,20 @@
     };
 
     returnObj.getCircularData = function (forProcessing) {
-      if (!$localCache.circular) {
-        $localCache.circular = betterStorage.circular;
+      if (!_lc.circular) {
+        _lc.circular = betterStorage.circular;
         if (!forProcessing) {
           processCircularData();
         }
       }
 
-      return $localCache.circular;
+      return _lc.circular;
     };
 
     returnObj.initialize = function (isApi) {
       /// <summary>Initialze store data. this method should be
       /// written such that, it should do a server retrieval when parameter is null.
       /// </summary>
-
-      if (gsnApi.getUseLocalStorage()) {
-        betterStorage = $localStorage;
-      }
 
       gsnApi.initApp();
 
@@ -365,30 +351,24 @@
         returnObj.getAdPods();
         returnObj.getManufacturerCouponTotalSavings();
       }
-
-
-      var gourl = ($location.search()).gourl || ($location.search()).goUrl;
-      if (gourl) {
-        gsnApi.goUrl(gourl);
-      }
     };
 
     $rootScope.$on('gsnevent:store-setid', function (event, values) {
       var storeId = values.newValue;
       var config = gsnApi.getConfig();
-      var hasNewStoreId = (gsnApi.isNull($localCache.storeId, 0) != storeId);
+      var hasNewStoreId = (gsnApi.isNull(_lc.storeId, 0) != storeId);
       var requireRefresh = hasNewStoreId && !config.AllContent;
 
       // attempt to load circular
       if (hasNewStoreId) {
-        $localCache.storeId = storeId;
-        $localCache.circularIsLoading = false;
+        _lc.storeId = storeId;
+        _lc.circularIsLoading = false;
       }
 
       // always call update circular on set storeId or if it has been more than 20 minutes
       var currentTime = new Date().getTime();
       var seconds = (currentTime - gsnApi.isNull(betterStorage.circularLastUpdate, 0)) / 1000;
-      if ((requireRefresh && !$localCache.circularIsLoading) || (seconds > 1200)) {
+      if ((requireRefresh && !_lc.circularIsLoading) || (seconds > 1200)) {
         returnObj.refreshCircular();
       }
       else if (hasNewStoreId) {
@@ -411,25 +391,34 @@
         }
       }
       var search = $location.search();
-      var selectFirstStore = search.sft || search.selectFirstStore || search.selectfirststore;
+      var selectFirstStore = search.sfs || search.selectFirstStore || search.selectfirststore;
       storeList = gsnApi.isNull(storeList, []);
       if (storeList.length == 1 || selectFirstStore) {
         if (storeList[0].StoreId != gsnApi.isNull(gsnApi.getSelectedStoreId(), 0)) {
           gsnApi.setSelectedStoreId(storeList[0].StoreId);
         }
       }
+      else if (search.storeid) {
+        var storeById = gsnApi.mapObject(storeList, 'StoreId');
+        gsnApi.setSelectedStoreId(storeById[search.storeid].StoreId);
+      }
+      else if (search.storenbr) {
+        var storeByNumber = gsnApi.mapObject(storeList, 'StoreNumber');
+        gsnApi.setSelectedStoreId(storeByNumber[search.storenbr].StoreId);
+      }
     }
 
     function processManufacturerCoupon() {
-      if (gsnApi.isNull($localCache.manufacturerCoupons.items, []).length > 0) return;
+      if (gsnApi.isNull(_lc.manufacturerCoupons.items, []).length > 0) return;
 
       // process manufacturer coupon
       var circular = returnObj.getCircularData();
-      $localCache.manufacturerCoupons.items = circular.ManufacturerCoupons;
-      angular.forEach($localCache.manufacturerCoupons.items, function (item) {
-        item.CategoryName = gsnApi.isNull($circularProcessed.categoryById[item.CategoryId], { CategoryName: '' }).CategoryName;
-        $circularProcessed.manuCouponById[item.ItemId] = item;
+      _lc.manufacturerCoupons.items = circular.ManufacturerCoupons;
+      angular.forEach(_lc.manufacturerCoupons.items, function (item) {
+        item.CategoryName = gsnApi.isNull(_cp.categoryById[item.CategoryId], { CategoryName: '' }).CategoryName;
+        _cp.manuCouponById[item.ItemId] = item;
       });
+      gsnApi.getConfig().hasPrintableCoupon = _lc.manufacturerCoupons.items.length > 0;
     }
 
     function processInstoreCoupon() {
@@ -437,31 +426,35 @@
       // process in-store coupon
       var items = [];
       angular.forEach(circular.InstoreCoupons, function (item) {
-        if (item.StoreIds.length <= 0 || item.StoreIds.indexOf($localCache.storeId) >= 0) {
-          item.CategoryName = gsnApi.isNull($circularProcessed.categoryById[item.CategoryId], { CategoryName: '' }).CategoryName;
-          $circularProcessed.storeCouponById[item.ItemId] = item;
+        if (item.StoreIds.length <= 0 || item.StoreIds.indexOf(_lc.storeId) >= 0) {
+          item.CategoryName = gsnApi.isNull(_cp.categoryById[item.CategoryId], { CategoryName: '' }).CategoryName;
+          _cp.storeCouponById[item.ItemId] = item;
           items.push(item);
         }
       });
 
-      $localCache.instoreCoupons.items = items;
+      gsnApi.getConfig().hasStoreCoupon = items.length > 0;
+
+      _lc.instoreCoupons.items = items;
     }
 
     function processYoutechCoupon() {
-      if (gsnApi.isNull($localCache.youtechCoupons.items, []).length > 0) return;
+      if (gsnApi.isNull(_lc.youtechCoupons.items, []).length > 0) return;
 
       var circular = returnObj.getCircularData();
 
       // process youtech coupon
-      $localCache.youtechCoupons.items = circular.YoutechCoupons;
-      angular.forEach($localCache.youtechCoupons.items, function (item) {
-        item.CategoryName = gsnApi.isNull($circularProcessed.categoryById[item.CategoryId], {CategoryName: ''}).CategoryName;
-        $circularProcessed.youtechCouponById[item.ItemId] = item;
+      _lc.youtechCoupons.items = circular.YoutechCoupons;
+      angular.forEach(_lc.youtechCoupons.items, function (item) {
+        item.CategoryName = gsnApi.isNull(_cp.categoryById[item.CategoryId], {CategoryName: ''}).CategoryName;
+        _cp.youtechCouponById[item.ItemId] = item;
       });
+
+      gsnApi.getConfig().hasDigitalCoupon = _lc.youtechCoupons.items.length > 0;
     }
 
     function processCoupon() {
-      if ($circularProcessed) {
+      if (_cp) {
         $timeout(processManufacturerCoupon, 50);
         $timeout(processInstoreCoupon, 50);
         $timeout(processYoutechCoupon, 50);
@@ -474,19 +467,19 @@
       if (!circularData.CircularTypes) return;
 
       betterStorage.circularLastUpdate = new Date().getTime();
-      $localCache.storeId = gsnApi.getSelectedStoreId();
+      _lc.storeId = gsnApi.getSelectedStoreId();
       processingQueue.length = 0;
 
       // process category into key value pair
       processingQueue.push(function () {
-        if ($circularProcessed.lastProcessDate == (new Date().getDate()) && $circularProcessed.categoryById[-1]) return;
+        if (_cp.lastProcessDate == (new Date().getDate()) && _cp.categoryById[-1]) return;
 
         var categoryById = gsnApi.mapObject(circularData.Categories, 'CategoryId');
 
         categoryById[null] = { CategoryId: null, CategoryName: '' };
         categoryById[-1] = { CategoryId: -1, CategoryName: 'Misc. Items' };
         categoryById[-2] = { CategoryId: -2, CategoryName: 'Ingredients' };
-        $circularProcessed.categoryById = categoryById;
+        _cp.categoryById = categoryById;
 
         return;
       });
@@ -501,7 +494,8 @@
       // foreach Circular
       angular.forEach(circulars, function (circ) {
         circ.StoreIds = circ.StoreIds || [];
-        if (circ.StoreIds.length <= 0 || circ.StoreIds.indexOf($localCache.storeId) >= 0) {
+        circ.CircularTypeName = (circularTypes[circ.CircularTypeId] || {}).Name;
+        if (circ.StoreIds.length <= 0 || circ.StoreIds.indexOf(_lc.storeId) >= 0) {
           circularData.Circulars.push(circ);
           if (!circ.Pagez) {
             circ.Pagez = circ.Pages;
@@ -511,7 +505,7 @@
           circ.Pages = [];
 
           angular.forEach(pages, function (page) {
-            if (page.StoreIds.length <= 0 || page.StoreIds.indexOf($localCache.storeId) >= 0) {
+            if (page.StoreIds.length <= 0 || page.StoreIds.indexOf(_lc.storeId) >= 0) {
               circ.Pages.push(page);
             }
           });
@@ -529,17 +523,17 @@
 
       // set result
       processingQueue.push(function () {
-        $circularProcessed.itemsById = gsnApi.mapObject(items, 'ItemId');
+        _cp.itemsById = gsnApi.mapObject(items, 'ItemId');
         return;
       });
 
       processingQueue.push(function () {
-        $circularProcessed.circularByTypeId = gsnApi.mapObject(circularByTypes, 'CircularTypeId');
+        _cp.circularByTypeId = gsnApi.mapObject(circularByTypes, 'CircularTypeId');
         return;
       });
 
       processingQueue.push(function () {
-        $circularProcessed.staticCircularById = gsnApi.mapObject(staticCirculars, 'CircularTypeId');
+        _cp.staticCircularById = gsnApi.mapObject(staticCirculars, 'CircularTypeId');
         return;
       });
 
@@ -547,7 +541,7 @@
 
       processingQueue.push(function () {
         if (cb) cb();
-        $circularProcessed.lastProcessDate = new Date().getDate();
+        _cp.lastProcessDate = new Date().getDate();
         $rootScope.$broadcast('gsnevent:circular-loaded', { success: true, response: circularData });
         return;
       });
@@ -582,7 +576,11 @@
 
       // foreach Page in Circular
       angular.forEach(pages, function (page) {
+        //var pageCopy = {};
+        //angular.extend(pageCopy, page);
+        //pageCopy.Items = [];
         itemCount += page.Items.length;
+        page.Circular = circ;
 
         processingQueue.push(function () {
           processCircularPage(items, circularMaster, page);
@@ -600,8 +598,37 @@
     }
 
     function processCircularPage(items, circularMaster, page) {
-      // foreach Item on Page
       angular.forEach(page.Items, function (item) {
+        item.PageNumber = parseInt(page.PageNumber);
+        item.rect = {x: 0, y: 0};
+        var pos = (item.AreaCoordinates + '').split(',');
+        if (pos.length > 2) {
+          var temp = 0;
+          for(var i = 0; i < 4; i++){
+            pos[i] = parseInt(pos[i]) || 0;
+          }
+          // swap if bad position
+          if (pos[0] > pos[2]){
+            temp = pos[0];
+            pos[0] = pos[2];
+            pos[2] = temp;
+          }
+          if (pos[1] > pos[3]){
+            temp = pos[1];
+            pos[1] = pos[3];
+            pos[3] = temp;
+          }
+
+          item.rect.x = pos[0];
+          item.rect.y = pos[1];
+          item.rect.xx = pos[2];
+          item.rect.yy = pos[3];
+          item.rect.width = pos[2] - pos[0]; // width
+          item.rect.height = pos[3] - pos[1]; // height
+          item.rect.cx = item.rect.width / 2; // center
+          item.rect.cy = item.rect.height / 2;
+        }
+        
         circularMaster.items.push(item);
         items.push(item);
       });

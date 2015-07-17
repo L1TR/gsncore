@@ -34,33 +34,48 @@
       
       // play slide show
       scope.play = function() {
+        scope.stop();
+
         isPlaying = true;
-        
-        slideTimer();
-      };
+
+        // set new refresh interval
+        cancelRefresh = $timeout(scope.next, options.interval);
+        return scope.$slideIndex;
+      }
       
       // pause slide show
       scope.stop = function() {
-        isPlaying = false;
-        
-        if (gsnApi.isNull(cancelRefresh, null) !== null) {
-          $timeout.cancel(cancelRefresh);
+        if (isPlaying) {
+          if (gsnApi.isNull(cancelRefresh, null) !== null) {
+            try {
+              $timeout.cancel(cancelRefresh);
+            } catch (e) {}
+          }
         }
+
+        isPlaying = false;
       };
       
       // go to next slide
       scope.next = function() {
-        scope.$slideIndex = doIncrement(scope.$slideIndex, 1);
+        $timeout(function() {
+          return scope.$slideIndex = doIncrement(scope.play(), 1);
+        }, 5);
       };
       
       // go to previous slide
       scope.prev = function() {
-        scope.$slideIndex = doIncrement(scope.$slideIndex, -1);
+        $timeout(function() {
+          return scope.$slideIndex = doIncrement(scope.play(), -1);
+        }, 5);
       };
 
       // go to specfic slide index
       scope.selectIndex = function(slideIndex) {
-        scope.$slideIndex = slideIndex;
+        $timeout(function() {
+          scope.$slideIndex = slideIndex;
+          return scope.play();
+        }, 5);
       };
 
       // get the current slide
@@ -70,14 +85,14 @@
       
       // add slide
       scope.addSlide = function(slide) {
-        scope.slides.push(slide);
+        return scope.slides.push(slide);
       };
 
       // remove a slide
       scope.removeSlide = function(slide) {
         //get the index of the slide inside the carousel
         var index = scope.indexOf(slide);
-        slides.splice(index, 1);
+        return slides.splice(index, 1);
       };
 
       // get a slide index
@@ -111,7 +126,9 @@
         
         // on index change, make sure check value is correct
         if (checkValue != newValue) {
-          scope.$slideIndex = checkValue;
+          $timeout(function() {
+            return scope.$slideIndex = checkValue;
+          }, 5);
         }
       });
       
@@ -123,17 +140,14 @@
       //#region private functions
       // initialize
       function activate() {
-        if (gsnApi.isNull(scope[attrs.slides], []).length <= 0) {
+        var slides = scope.$eval(attrs.slides);
+        if (gsnApi.isNull(slides, []).length <= 0) {
           $timeout(activate, 200);
           return;
         }
         
-        isPlaying = gsnApi.isNull(options.interval, null) !== null;
-        scope.slides = scope[attrs.slides];
+        scope.slides = slides;
         scope.selectIndex(0);
-        
-        // trigger the timer
-        slideTimer();
         var win = angular.element($window);
         win.blur(function() {
           wasRunning = scope.isPlaying();
@@ -145,29 +159,10 @@
             scope.play();
           }
         });
+
+        return;
       }
 
-      // the slide timer
-      function slideTimer() {
-        if (!isPlaying) {
-          return;
-        }
-        
-        cancelRefresh = $timeout(function doWork() {
-          if (!isPlaying) {
-            return;
-          }
-
-          scope.next();
-          
-          // set new refresh interval
-          cancelRefresh = $timeout(doWork, options.interval);
-          
-          // empty return to further prevent memory leak
-          return;
-        }, options.interval);
-      }
-      
       // safe increment
       function doIncrement(slideIndex, inc) {
         var newValue = slideIndex + inc;

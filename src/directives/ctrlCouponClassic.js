@@ -22,7 +22,9 @@
     $scope.addCouponToCard = addCouponToCard;
     $scope.printManufacturerCoupon = printManufacturerCoupon;
     $scope.loadMore = loadMore;
-    $scope.printer = { blocked: 0, notsupported: 0, notinstalled: 0, printed: null, count: 0, total: 0 };
+    $scope.printer = { blocked: 0, 
+      notsupported: 0, notinstalled: 0, printed: null, 
+      count: 0, total: 0, isChrome: /chrome/gi.test(gsnApi.userAgent) };
 
 
     $scope.isValidProLogic = false;
@@ -39,11 +41,23 @@
       targeted: []
     };
 
-    $scope.sortBy = 'EndDate';
-    $scope.sortByName = 'About to Expire';
-    $scope.filterBy = '';
-    $scope.couponType = $scope.couponType || 'digital';  // 'digital', 'printable', 'instore'
-    $scope.itemsPerPage = ($location.search()).itemsperpage || ($location.search()).itemsPerPage || $scope.itemsPerPage || 20;
+    $scope.coupons = {
+      printable: { items: []},
+      digital: { items: []},
+      store: { items: []}
+    };
+    $scope.vm = {
+      filterBy: $location.search().q,
+      sortBy: 'EndDate',
+      sortByName: 'About to Expire'
+    }
+
+    $scope.couponType = $scope.friendlyPath.replace('coupons-', '');
+    $scope.itemsPerPage = $location.search().itemsperpage || $location.search().itemsPerPage || $scope.itemsPerPage || 20;
+
+    if ($scope.couponType.length < 1 || $scope.couponType == $scope.friendlyPath){
+      $scope.couponType = 'printable';
+    }
 
     function loadMore() {
       var items = $scope.preSelectedCoupons.items || [];
@@ -70,6 +84,10 @@
         };
       }
 
+      $scope.coupons.printable.items = manuCoupons.items || [];
+      $scope.coupons.store.items = instoreCoupons.items || [];
+      $scope.coupons.digital.items = youtechCouponsOriginal.items || [];
+      
       $scope.preSelectedCoupons.items.length = 0;
       $scope.preSelectedCoupons.targeted.length = 0;
       var list = $scope.preSelectedCoupons;
@@ -89,16 +107,18 @@
             }
           }
         });
-          
+
         $scope.selectedCoupons.totalSavings = totalSavings.toFixed(2);
-      } else if ($scope.couponType == 'printable') {
+      } else if ($scope.couponType == 'store') {
+        list.items = instoreCoupons.items;
+      }
+      else {
+        gsnCouponPrinter.init();
         gsnStore.getManufacturerCouponTotalSavings().then(function (rst) {
           $scope.selectedCoupons.totalSavings = parseFloat(rst.response).toFixed(2);
         });
 
         list.items = manuCoupons.items;
-      } else if ($scope.couponType == 'instore') {
-        list.items = instoreCoupons.items;
       }
     }
 
@@ -106,9 +126,9 @@
       loadCoupons();
 
       // apply filter
-      $scope.preSelectedCoupons.items = $filter('filter')($filter('filter')($scope.preSelectedCoupons.items, $scope.filterBy), { IsTargeted: false });
-      $scope.preSelectedCoupons.items = $filter('orderBy')($filter('filter')($scope.preSelectedCoupons.items, $scope.filterBy), $scope.sortBy);
-      $scope.preSelectedCoupons.targeted = $filter('orderBy')($filter('filter')($scope.preSelectedCoupons.targeted, $scope.filterBy), $scope.sortBy);
+      $scope.preSelectedCoupons.items = $filter('filter')($filter('filter')($scope.preSelectedCoupons.items, $scope.vm.filterBy), { IsTargeted: false });
+      $scope.preSelectedCoupons.items = $filter('orderBy')($filter('filter')($scope.preSelectedCoupons.items, $scope.vm.filterBy), $scope.vm.sortBy);
+      $scope.preSelectedCoupons.targeted = $filter('orderBy')($filter('filter')($scope.preSelectedCoupons.targeted, $scope.vm.filterBy), $scope.vm.sortBy);
       $scope.selectedCoupons.items.length = 0;
       $scope.selectedCoupons.targeted = $scope.preSelectedCoupons.targeted;
       loadMore();
@@ -138,24 +158,28 @@
     });
 
     $scope.$on('gsnevent:youtech-cardcoupon-loaded', activate);
-    $scope.$watch('sortBy', activate);
-    $scope.$watch('filterBy', activate);
+    $scope.$watch('vm.sortBy', activate);
+    $scope.$watch('vm.filterBy', activate);
     $scope.$watch('selectedCoupons.cardCouponOnly', activate);
     
     // trigger modal
     $scope.$on('gsnevent:gcprinter-not-supported', function() {
-      $scope.printer.blocked++;
+      $scope.printer.notsupported++;
     });
     $scope.$on('gsnevent:gcprinter-blocked', function() {
-      $scope.printer.notsupported++;
+      $scope.printer.blocked++;
     });
     $scope.$on('gsnevent:gcprinter-not-found', function() {
       $scope.printer.notinstalled++;
     });
-    $scope.$on('gsnevent:gcprinter-printed', function(e, rsp) {
+    $scope.$on('gsnevent:gcprinter-initcomplete', function() {
+      $scope.gcprinter = gcprinter;
+      $scope.printer.gcprinter = gcprinter;
+    });
+    $scope.$on('gsnevent:gcprinter-printed', function(evt, e, rsp) {
       $scope.printer.printed = e;
       if (rsp) {
-        $scope.printer.errors = gsnApi.isNull(response.ErrorCoupons, []);
+        $scope.printer.errors = gsnApi.isNull(rsp.ErrorCoupons, []);
         var count = $scope.printer.total - $scope.printer.errors.length;
         if (count > 0) {
           $scope.printer.count = count;
@@ -167,6 +191,13 @@
     //#region Internal Methods             
     function printManufacturerCoupon(evt, item) {
       gsnCouponPrinter.print([item]);
+
+      $analytics.eventTrack('CouponPrintNow', 
+        { category: item.ExtCategory, 
+          label: item.Description1, 
+          value: item.ProductCode });
+
+      gsn.emit('PrintNow', item);
     }
       
     function addCouponToCard(evt, item) {
@@ -178,6 +209,7 @@
             $analytics.eventTrack('CouponAddToCard', { category: item.ExtCategory, label: item.Description1, value: item.ProductCode });
 
             $scope.doToggleCartItem(evt, item);
+
             // apply
             $timeout(function () {
               item.AddCount++;
@@ -190,6 +222,7 @@
         $analytics.eventTrack('CouponRemoveFromCard', { category: item.ExtCategory, label: item.Description1, value: item.ProductCode });
 
         $scope.doToggleCartItem(evt, item);
+
         // apply
         $timeout(function () {
           item.AddCount--;

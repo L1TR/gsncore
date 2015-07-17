@@ -50,6 +50,7 @@
   } else {
     root.gsn = gsn;
   }
+  gsn.root = root;
 
   /**
    * The semantic version number.
@@ -88,6 +89,7 @@
     ChainId: 0,
     ChainName: 'Grocery Shopping Network',
     DfpNetworkId: '/6394/digitalstore.test',
+    GoogleTagId: null,
     GoogleAnalyticAccountId1: null,
     GoogleAnalyticAccountId2: null,
     GoogleSiteVerificationId: null,
@@ -96,12 +98,15 @@
     FacebookPermission: null,
     GoogleSiteSearchCode: null,
     DisableLimitedTimeCoupons: false,
-    hasRoundyProfile: false,
-    hasInit: false,
     Theme: null,
     HomePage: null,
     StoreList: null,
-    AllContent: null
+    AllContent: null,
+    hasDigitalCoupon: false,
+    hasStoreCoupon: false,
+    hasPrintableCoupon: false,
+    hasRoundyProfile: false,
+    hasInit: false
   };
 
   gsn.identity = function (value) {
@@ -333,7 +338,18 @@
         obj[list[attribute]] = list;
       } else {
         gsn.map(list, function (item, i) {
-          obj[item[attribute]] = item;
+          var k = item[attribute];
+          var e = obj[k];
+          if (e) {
+            if( Object.prototype.toString.call( e ) !== '[object Array]' ) {
+              e = [e]; 
+            }
+            e.push(item);
+          }
+          else {
+            e = item;
+          }
+          obj[k] = e;
         });
       }
     }
@@ -353,6 +369,24 @@
   // on itself (in other words, not on a prototype).
   gsn.has = function (obj, key) {
     return hasOwnProperty.call(obj, key);
+  };
+
+  // allow for IE compatible delete
+  gsn.delete = function(obj, key) {
+    obj[key] = undefined;
+    try {
+      delete obj[k];
+    }
+    catch (e) {
+      var items = {};
+      gsn.each(obj, function(v, k) {
+        if (k != key)
+          items[k] = v;
+      });
+
+      return items;
+    }
+    return obj;
   };
 
   gsn.getUrl = function (baseUrl, url) {
@@ -385,6 +419,10 @@
   };
 
   gsn.initAnalytics = function($analyticsProvider) {
+    // provide backward compatibility if not googletag
+    if (gsn.config.GoogleTagId) {
+      return;
+    }
 
     // GA already supports buffered invocations so we don't need
     // to wrap these inside angulartics.waitForVendorApi
@@ -481,6 +519,9 @@
   gsn.init = function($locationProvider, $sceDelegateProvider, $sceProvider, $httpProvider, FacebookProvider, $analyticsProvider) {
     gsn.initAngular($sceProvider, $sceDelegateProvider, $locationProvider, $httpProvider, FacebookProvider);
     gsn.initAnalytics($analyticsProvider);
+    if (typeof(root._tk) !== 'undefined'){
+      root._tk.util.Emitter(gsn);
+    }
   };
   
   // support angular initialization
@@ -488,7 +529,7 @@
     gsn.applyConfig(root.globalConfig.data || {});
     gsn.config.ContentBaseUrl = root.location.port > 1000 && root.location.port < 5000 ? "/asset/" + gsn.config.ChainId : gsn.config.ContentBaseUrl;
     gsn.config.hasRoundyProfile = [215, 216, 217, 218].indexOf(gsn.config.ChainId) > -1;
-    gsn.config.DisableLimitedTimeCoupons = (215 ==  gsn.config.ChainId);
+    gsn.config.DisableLimitedTimeCoupons = (215 === gsn.config.ChainId);
     if (gsn.config.Theme) {
       gsn.setTheme(gsn.config.Theme);
     }
@@ -496,14 +537,19 @@
     //#region security config
     // For security reason, please do not disable $sce
     // instead, please use trustHtml filter with data-ng-bind-html for specific trust
-    $sceProvider.enabled(!gsn.browser.isIE);
+    $sceProvider.enabled(!gsn.browser.isIE && root.location.protocol.indexOf('http') >= 0);
 
     $sceDelegateProvider.resourceUrlWhitelist(gsn.config.SceWhiteList || [
       'self',
-      'http://**.gsn.io/**',
-      'https://**.gsn2.com/**',
+      'http://*.gsn.io/**',
+      'http://*.*.gsn.io/**',
+      'http://*.*.*.gsn.io/**',
+      'http://*.gsn2.com/**',
+      'https://*.gsn2.com/**',
       'http://*.gsngrocers.com/**',
-      'https://*.gsngrocers.com/**']);
+      'https://*.gsngrocers.com/**',
+      'http://localhost:*/**',
+      'file:///**']);
 
 
     //gets rid of the /#/ in the url and allows things like 'bootstrap collapse' to function
@@ -537,6 +583,15 @@
 
   //#region dynamic script loader
   function loadSingleScript(uri, callbackFunc) {
+    if (uri.indexOf('//') === 0) {
+      uri = 'http:' + uri;
+    }
+
+    // Prefix protocol
+    if ((root.location || {}).protocol === 'file') {
+      uri = uri.replace('https://', 'http://')
+    }
+
     var tag = document.createElement('script');
     tag.type = 'text/javascript';
     tag.src = uri;
@@ -566,6 +621,10 @@
       }
     }
     else {
+      if (typeof(uris) == 'string'){
+        uris = [uris];
+      }
+      
       var toProcess = [].concat(uris);
       processNext();
     }

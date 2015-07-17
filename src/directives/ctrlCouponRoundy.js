@@ -2,100 +2,10 @@
   'use strict';
   var myModule = angular.module('gsn.core');
 
-  myModule.controller('ctrlPrinterBlocked', ['$scope', '$modalInstance', 'rootScope', function ($scope, $modalInstance, rootScope) {
-    $scope.print = function () {
-      rootScope.printClippedCoupons();
-      $modalInstance.dismiss('cancel');
-    };
-
-    $scope.cancel = function () {
-      $modalInstance.dismiss('cancel');
-    };
-  }]);
-
-  myModule.controller('ctrlPrinterInstall', ['$scope', '$modalInstance', 'rootScope', function ($scope, $modalInstance, rootScope) {
-    rootScope.isSocketActive = true;
-
-    function websocket() {
-      var socket = new WebSocket("ws://localhost:26876");
-      socket.onopen = function () {
-        //Print coupon
-        $modalInstance.dismiss('cancel');
-        rootScope.printClippedCoupons();
-      };
-
-      socket.onclose = function (event) {
-        if (event.wasClean) {
-          console.log('Connection closed');
-        } else {
-          console.log('Connection lost');
-        }
-        console.log('Code: ' + event.code + ' reason: ' + event.reason);
-      };
-
-      socket.onmessage = function (event) {
-        console.log("Recieved data: " + event.data);
-      };
-
-      socket.onerror = function (error) {
-        console.log("Error: " + error.message);
-        setTimeout(function () { if (rootScope.isSocketActive) websocket(); }, 1000);
-      };
-    }
-
-    $scope.install = function () {
-      websocket();
-      rootScope.installPrint();
-    };
-
-    $scope.cancel = function () {
-      $modalInstance.dismiss('cancel');
-    };
-  }]);
-
-  myModule.controller('ctrlPrinterBlockedNoPrint', ['$scope', '$modalInstance', 'rootScope', function ($scope, $modalInstance, rootScope) {
-    $scope.repeat = function () {
-      rootScope.checkPrintStatus();
-      $modalInstance.dismiss('cancel');
-    };
-
-    $scope.cancel = function () {
-      $modalInstance.dismiss('cancel');
-    };
-  }]);
-
-  myModule.controller('ctrlPrinterResult', ['$scope', '$modalInstance', 'printed', 'failed', function ($scope, $modalInstance, printed, failed) {
-    $scope.printed = printed;
-    $scope.failed = failed;
-
-    $scope.cancel = function () {
-      $modalInstance.dismiss('cancel');
-    };
-  }]);
-
-  myModule.controller('ctrlPrinterReady', ['$scope', '$modalInstance', 'processPrint', function ($scope, $modalInstance, processPrint) {
-    $scope.readyCount = readyCount;
-
-    $scope.print = function () {
-      processPrint();
-      $modalInstance.dismiss('cancel');
-    };
-
-    $scope.cancel = function () {
-      $modalInstance.dismiss('cancel');
-    };
-  }]);
-
-  myModule.controller('ctrlRoundyFailed', ['$scope', '$modalInstance', function ($scope, $modalInstance) {
-    $scope.ok = function () {
-      $modalInstance.dismiss('cancel');
-    };
-  }]);
-
   var myDirectiveName = 'ctrlCouponRoundy';
 
   angular.module('gsn.core')
-    .controller(myDirectiveName,  ['$scope', 'gsnStore', 'gsnApi', '$timeout', '$analytics', '$filter', '$modal', 'gsnYoutech', 'gsnPrinter', 'gsnProfile', '$location', myController])
+    .controller(myDirectiveName,  ['$scope', 'gsnStore', 'gsnApi', '$timeout', '$analytics', '$filter',  'gsnYoutech', 'gsnProfile', '$location', 'gsnCouponPrinter', myController])
     .directive(myDirectiveName, myDirective);
 
   function myDirective() {
@@ -108,13 +18,12 @@
     return directive;
   }    
 
-  function myController($scope, gsnStore, gsnApi, $timeout, $analytics, $filter, $modal, gsnYoutech, gsnPrinter, gsnProfile, $location) {
-    $scope.checkPrinter = false;
-    $scope.utInited = false;
+  function myController($scope, gsnStore, gsnApi, $timeout, $analytics, $filter, gsnYoutech, gsnProfile, $location, gsnCouponPrinter) {
     $scope.activate = activate;
     $scope.addCouponToCard = addCouponToCard;
     $scope.printManufacturerCoupon = printManufacturerCoupon;
     $scope.printClippedCoupons = printClippedCoupons;
+	$scope.showPrint = showPrint;
     $scope.loadMore = loadMore;
     $scope.clipCoupon = clipCoupon;
     $scope.isOnClippedList = isOnClippedList;
@@ -122,14 +31,10 @@
     $scope.getClippedSavedAmount = getClippedSavedAmount;
     $scope.countClippedCoupons = countClippedCoupons;
     $scope.getPercentOfClipped = getPercentOfClipped;
-    $scope.checkPrintStatus = checkPrintStatus;
     $scope.changeFilter = changeFilter;
     $scope.unclipCoupon = unclipCoupon;
     $scope.preClipCoupon = preClipCoupon;
-    $scope.isSocketActive = false;
-    $scope.installPrint = null;
     $scope.departments = [];
-    $scope.couponsWithError = [];
     $scope.couponsPrinted = [];
     $scope.selectedCoupons = {
       items: [],
@@ -139,23 +44,23 @@
       printedCouponOnly: false,
       clippedCouponOnly: false,
       totalSavings: 0,
-      isFailedLoading: false,
+      isFailedLoading: false
     };
-
+    $scope.gcprinter = gcprinter;
+    $scope.printer = { blocked: 0, notsupported: 0, notinstalled: 0, printed: null, count: 0, total: 0, isChrome: /chrome/gi.test(gsnApi.userAgent) };
     $scope.preSelectedCoupons = {
       items: [],
       targeted: []
     };
 
     $scope.clippedCount = 0;
-    $scope.clippedCoupons = [];
+    $scope.clippedCoupons = {};
     $scope.sortBy = 'EndDate';
     $scope.sortByName = 'About to Expire';
     $scope.filterByComplex = '';
-    $scope.filterBy = '';
+    $scope.filterBy = $location.search().q;
     $scope.couponType = $scope.couponType || 'digital';  // 'digital', 'printable', 'instore'
     $scope.itemsPerPage = ($location.search()).itemsperpage || ($location.search()).itemsPerPage || $scope.itemsPerPage || 20;
-
 
     function loadMore() {
       var items = $scope.preSelectedCoupons.items || [];
@@ -174,13 +79,9 @@
       var manuCoupons = gsnStore.getManufacturerCoupons(),
           youtechCouponsOriginal = gsnStore.getYoutechCoupons(),
           instoreCoupons = gsnStore.getInstoreCoupons();
-      if ($scope.couponType == 'digital' && gsnApi.isNull(youtechCouponsOriginal.items, []).length <= 0) {
-        gsnStore.refreshCircular();
-        return;
-      }
-      else if ($scope.couponType == 'printable' && gsnApi.isNull(!manuCoupons.items, []).length <= 0) {
-        gsnStore.refreshCircular();
-        return;
+  
+      if ($scope.couponType == 'printable') {
+        gsnCouponPrinter.init();
       }
       
       preprocessCoupons(manuCoupons, youtechCouponsOriginal, instoreCoupons);
@@ -298,8 +199,6 @@
       if (data.success) {
         $timeout(function () {
           activate();
-          if ($scope.checkPrinter)
-            checkPrintStatus();
         }, 500);
         $scope.selectedCoupons.noCircular = false;
       } else {
@@ -310,11 +209,6 @@
     $scope.$on('gsnevent:youtech-cardcoupon-loaded', activate);
     $scope.$on('gsnevent:youtech-cardcoupon-loadfail', function () {
       $scope.selectedCoupons.isFailedLoading = true;
-      //Show modal
-      $modal.open({
-        templateUrl: gsn.getThemeUrl('/views/roundy-failed.html'),
-        controller: 'ctrlRoundyFailed',
-      });
     });
     $scope.$watch('sortBy', activate);
     $scope.$watch('filterBy', activate);
@@ -326,13 +220,13 @@
 
     //#region Internal Methods             
     function printManufacturerCoupon(evt, item) {
-      gsnPrinter.initPrinter([item], true);
+      gsnCouponPrinter.print([item]);
     }
 
     function synchWirhErrors() {
-      if ($scope.errorsonPrint) {
+      if ($scope.printer.errors) {
         angular.forEach($scope.preSelectedCoupons.items, function (coupon) {
-          var found = $filter('filter')($scope.errorsonPrint, { CouponId: coupon.ProductCode });
+          var found = $filter('filter')($scope.printer.errors, { CouponId: coupon.ProductCode });
           if (found.length > 0) {
             unclipCoupon(coupon);
             coupon.ErrorMessage = found[0].ErrorMessage;
@@ -341,93 +235,48 @@
       }
     }
 
-    function checkPrintStatus() {
-      gsnPrinter.initPrinter($scope.preSelectedCoupons.items, false, {
-        blocked: function () {
-          $modal.open({
-            templateUrl: gsn.getThemeUrl('/views/coupons-plugin-blocked-noprint.html'),
-            controller: 'ctrlPrinterBlockedNoPrint',
-            resolve: {
-              rootScope: function () {
-                return $scope;
-              }
-            }
-          });
-        },
-        failedCoupons: function (errors) {
-          $scope.errorsonPrint = errors;
-          synchWirhErrors();
-        },
-      }, true);
-    }
+    // trigger modal
+    $scope.$on('gsnevent:gcprinter-not-supported', function() {
+      $scope.printer.notsupported++;
+    });
+    $scope.$on('gsnevent:gcprinter-blocked', function() {
+      $scope.printer.blocked++;
+    });
+    $scope.$on('gsnevent:gcprinter-not-found', function() {
+      $scope.printer.notinstalled++;
+    });
+    $scope.$on('gsnevent:gcprinter-initcomplete', function() {
+      $scope.gcprinter = gcprinter;
+      $scope.printer.gcprinter = gcprinter;
+    });
+    $scope.$on('gsnevent:gcprinter-printed', function(evt, e, rsp) {
+      $scope.printer.printed = e;
+      if (rsp) {
+        $scope.printer.errors = gsnApi.isNull(rsp.ErrorCoupons, []);
+        var count = $scope.printer.total - $scope.printer.errors.length;
+        if (count > 0) {
+          $scope.printer.count = count;
+        }
+		$scope.printer.total = 0;
+      }
+    });
+		
+	function showPrint() {
+	  $scope.printer.printed = null; 
+	  var clippedCouponsInArr = [];
+	  for(var key in $scope.clippedCoupons){
+	    clippedCouponsInArr.push($scope.clippedCoupons[key]);
+	  }
+	  $scope.printer.total = clippedCouponsInArr.length;
+	}
 
-    function printClippedCoupons() {
-      var clippedCouponsInArr = Object.keys($scope.clippedCoupons).map(function (key) {
-        return $scope.clippedCoupons[key];
-      });
-      gsnPrinter.initPrinter(clippedCouponsInArr, false, {
-        notInstalled: function (installFc) {
-          $scope.installPrint = installFc;
-          //Show popup
-          var modalInstance = $modal.open({
-            templateUrl: gsn.getThemeUrl('/views/coupons-plugin-install.html'),
-            controller: 'ctrlPrinterInstall',
-            resolve: {
-              rootScope: function () {
-                return $scope;
-              }
-            }
-          });
-
-          modalInstance.result.then(function () {
-            $scope.isSocketActive = false;
-          }, function () {
-            $scope.isSocketActive = false;
-          })['finally'](function () {
-            $scope.modalInstance = undefined;
-          });
-        },
-        blocked: function () {
-          $modal.open({
-            templateUrl: gsn.getThemeUrl('/views/coupons-plugin-blocked.html'),
-            controller: 'ctrlPrinterBlocked',
-            resolve: {
-              rootScope: function () {
-                return $scope;
-              }
-            }
-          });
-        },
-        result: function (printed, failed) {
-          angular.forEach($scope.preSelectedCoupons.items, function (coupon) {
-            if (isOnClippedList(coupon)) {
-              unclipCoupon(coupon);
-              coupon.isPrint = true;
-              $scope.couponsPrinted = [];
-              $scope.couponsPrinted.push(coupon);
-            }
-          });
-          $modal.open({
-            templateUrl: gsn.getThemeUrl('/views/coupons-plugin-result.html'),
-            controller: 'ctrlPrinterResult',
-            resolve: {
-              printed: function () {
-                return printed;
-              },
-              failed: function () {
-                return failed;
-              }
-            }
-          });
-        },
-        readyAlert: function (readyCount, processPrint) {
-          processPrint();
-        },
-        failedCoupons: function (errors) {
-          $scope.errorsonPrint = errors;
-          synchWirhErrors();
-        },
-      }, false);
+    function printClippedCoupons() {     
+	  var clippedCouponsInArr = [];
+      for(var key in $scope.clippedCoupons){
+        clippedCouponsInArr.push($scope.clippedCoupons[key]);
+      } 
+      gsnCouponPrinter.print(clippedCouponsInArr);
+      $scope.$emit('gsnevent:closemodal');
     }
 
     function addCouponToCard(evt, item) {
@@ -473,7 +322,7 @@
 
     function unclipCoupon(item) {
       if ($scope.clippedCoupons[item.ProductCode]) {
-        $scope.clippedCoupons[item.ProductCode] = null;
+        $scope.clippedCoupons = gsnApi.delete($scope.clippedCoupons, item.ProductCode);
         gsnProfile.unclipCoupon(item.ProductCode);
       }
       countClippedCoupons();
@@ -484,15 +333,17 @@
     }
 
     function countClippedCoupons() {
-      $scope.clippedCount = Object.keys($scope.clippedCoupons).length;
+      $scope.clippedCount = gsnApi.keys($scope.clippedCoupons).length;
       return $scope.clippedCount;
     }
 
     function addClippedToList() {
-      angular.forEach($scope.clippedCoupons, function (coupon) {
-        if (!gsnProfile.isOnList(coupon))
+      for (var key in $scope.clippedCoupons) {
+        if (!isNaN(parseInt(key))) {
+          var coupon = $scope.clippedCoupons[key];
           $scope.doToggleCartItem(null, coupon);
-      });
+        }
+      }
     }
 
     function getClippedSavedAmount() {
@@ -500,7 +351,8 @@
       for (var key in $scope.clippedCoupons) {
         if (!isNaN(parseInt(key))) {
           var coupon = $scope.clippedCoupons[key];
-          saved += parseFloat(coupon.SavingsAmount);
+		  if(coupon != null)
+            saved += parseFloat(coupon.SavingsAmount);
         }
       }
       return saved.toFixed(2);

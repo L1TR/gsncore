@@ -1,18 +1,35 @@
 (function (gsn, angular, undefined) {
   'use strict';
-  /* fake definition of angular-facebook if there is none */
-  angular.module('facebook', []);
+  
+  /* fake definition of angular-facebook if there is none */ 
+  angular.module('facebook', []).provider('Facebook', function test(){
+    return { init: function() {}, $get: function() { return new test(); } };
+  });
+  angular.module('ui.map', []);
+  angular.module('ui.event', []);
+  angular.module('ui.utils', []);
+  angular.module('ui.keypress', []);
+  angular.module('chieffancypants.loadingBar', []);
 
   var serviceId = 'gsnApi';
-  var mygsncore = angular.module('gsn.core', ['ngRoute', 'ngSanitize', 'facebook', 'angulartics']);
+  var mygsncore = angular.module('gsn.core', ['ngRoute', 'ngSanitize', 'facebook', 'angulartics', 'ui.event']);
 
   mygsncore.config(['$locationProvider', '$sceDelegateProvider', '$sceProvider', '$httpProvider', 'FacebookProvider', '$analyticsProvider',
     function($locationProvider, $sceDelegateProvider, $sceProvider, $httpProvider, FacebookProvider, $analyticsProvider) {
       gsn.init($locationProvider, $sceDelegateProvider, $sceProvider, $httpProvider, FacebookProvider, $analyticsProvider)
     }
    ])
-  .run(['$rootScope', 'gsnGlobal', 'gsnApi', function ($rootScope, gsnGlobal, gsnApi) {
+  .run(['$rootScope', 'gsnGlobal', 'gsnApi', '$window', function ($rootScope, gsnGlobal, gsnApi, $window) {
+    var head = angular.element('head');
+    var myHtml = '<!--[if lt IE 10]>\n' +
+      '<script src="https://cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7/html5shiv.min.js"></script>' +
+      '<script src="https://cdnjs.cloudflare.com/ajax/libs/es5-shim/2.2.0/es5-shim.min.js"></script>' +
+      '<script src="https://cdnjs.cloudflare.com/ajax/libs/json2/20130526/json2.min.js"></script>' +
+      '\n<![endif]-->';
+    head.append(myHtml);
+
     $rootScope.siteMenu = gsnApi.getConfig().SiteMenu;
+    $rootScope.win = $window;
     gsnGlobal.init(true);
   }]);
 
@@ -23,8 +40,10 @@
     var profileStorage = $localStorage;
 
     $rootScope[serviceId] = returnObj;
-
     //#region gsn pass-through methods
+    returnObj.gsn = gsn;
+    gsn.$api = returnObj;
+
     // return defaultValue if null - isNull(val, defaultIfNull)
     returnObj.isNull = gsn.isNull;
 
@@ -46,6 +65,8 @@
     // shallow extend method - extend(dest, src)
     returnObj.extend = gsn.extend;
 
+    returnObj.keys = gsn.keys;
+
     returnObj.getContentUrl = function(url) {
       return $sce.trustAsResourceUrl(gsn.getContentUrl(url));
     };
@@ -65,6 +86,8 @@
     returnObj.browser = gsn.browser;
 
     returnObj.parsePartialContentData = gsn.parsePartialContentData;
+    
+    returnObj.delete = gsn.delete;
     //#endregion
 
     //#region gsn.config pass-through
@@ -224,6 +247,7 @@
       returnObj.goUrl($location.url(), '_reload');
     };
 
+    // allow external code to change the url of angular app
     gsn.goUrl = returnObj.goUrl;
     //#endregion
 
@@ -277,7 +301,9 @@
 
     returnObj.parseStoreSpecificContent = function(contentData) {
       var contentDataResult = {};
+      var possibleResult = [];
       var myContentData = contentData;
+      var allStoreCount = gsn.config.StoreList.length;
       var storeId = returnObj.isNull(returnObj.getSelectedStoreId(), 0);
 
       // determine if contentData is array
@@ -296,15 +322,31 @@
         i++;
 
         if (storeId <= 0) {
+          if (allStoreCount == v.StoreIds.length) {
+            contentDataResult = v;
+          }
+          
           return;
         }
 
         angular.forEach(storeIds, function (v1, k1) {
           if (storeId == v1) {
             contentDataResult = v;
+            possibleResult.push(v);
           }
         });
       });
+
+      var maxStoreIdCount = allStoreCount;
+      if (possibleResult.length > 1){
+        // use result with least number of stores
+        angular.forEach(possibleResult, function(v, k){
+          if (v.StoreIds.length > 1 && v.StoreIds.length < maxStoreIdCount){
+            maxStoreIdCount = v.StoreIds.length;
+            contentDataResult = v;
+          }
+        });
+      }
 
       return contentDataResult;
     };
@@ -375,26 +417,6 @@
     };
     //#endregion
 
-    // wait until some function eval to true, also provide a timeout default to 2 seconds
-    returnObj.waitUntil = function(evalFunc, timeout) {
-      var deferred = $q.defer();
-      var timeUp = false;
-      $timeout(function() {
-        timeUp = true;
-      }, timeout || 2000);
-
-      function doWait() {
-        if (timeUp || evalFunc()) {
-          deferred.resolve({ success: !timeUp });
-        }
-
-        $timeout(doWait, 200);
-      }
-
-      doWait();
-      return deferred.promise;
-    };
-
     returnObj.getApiHeaders = function () {
       // assume access token data is available at this point
       var accessTokenData = getAccessToken();
@@ -424,6 +446,9 @@
 
       return returnObj.isNull(accessTokenData.grant_type, '') == 'password';
     };
+
+    gsn.isLoggedIn = returnObj.isLoggedIn;
+    gsn.getUserId = returnObj.getProfileId;
 
     returnObj.logOut = function () {
       /// <summary>Log a user out.</summary>
@@ -505,7 +530,7 @@
     //  -- it will create a defer and return promise
     //  -- it will make http request and call defer resolve on success
     // when it has defer or data, it will return the promise
-    returnObj.httpGetOrPostWithCache = function (cacheObject, url, payload) {
+    returnObj.http = function (cacheObject, url, payload) {
       // when it has data, it will simulate resolve and return promise
       // when it doesn't have defer, it will create a defer and trigger request
       // otherwise, just return the promise
@@ -543,6 +568,8 @@
       return cacheObject.deferred.promise;
     };
 
+    returnObj.httpGetOrPostWithCache = returnObj.http;
+
     returnObj.isValidCaptcha = function (challenge, response) {
       var defer = $q.defer();
       $http.post(gsn.config.AuthServiceUrl + "/ValidateCaptcha", { challenge: challenge, response: response }, { headers: { 'Content-Type': 'application/json' } })
@@ -562,7 +589,6 @@
 
     returnObj.initApp = function () {
       $rootScope.appState = 'initializing';
-      initStorage();
 
       // injecting getContentUrl and getThemeUrl for css
       $rootScope.getContentUrl = returnObj.getContentUrl;
@@ -676,10 +702,6 @@
       var tk = returnObj.isNull(token, {});
 
       $localStorage.anonymousToken = tk;
-    }
-
-    function initStorage() {
-      // do nothing for now
     }
 
 //#endregion

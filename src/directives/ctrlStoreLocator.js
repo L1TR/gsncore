@@ -4,7 +4,7 @@
   var myDirectiveName = 'ctrlStoreLocator';
 
   angular.module('gsn.core')
-    .controller(myDirectiveName, ['$scope', 'gsnApi', '$notification', '$timeout', '$rootScope', '$location', 'gsnStore', myController])
+    .controller(myDirectiveName, ['$scope', 'gsnApi', '$notification', '$timeout', '$rootScope', '$location', 'gsnStore', 'debounce', myController])
     .directive(myDirectiveName, myDirective);
 
   function myDirective() {
@@ -17,10 +17,9 @@
     return directive;
   }
 
-  function myController($scope, gsnApi, $notification, $timeout, $rootScope, $location, gsnStore) {
+  function myController($scope, gsnApi, $notification, $timeout, $rootScope, $location, gsnStore, debounce) {
     $scope.activate = activate;
 
-    var geocoder = new google.maps.Geocoder();
     var defaultZoom = $scope.defaultZoom || 10;
 
     $scope.fromUrl = $location.search().fromUrl;
@@ -29,7 +28,7 @@
     $scope.currentMarker = null;
     $scope.showIntermission = 0;
     $scope.distanceOrigin = null;
-    $scope.storeList = gsnStore.getStoreList();
+    $scope.storeList = [];
     $scope.currentStoreId = gsnApi.getSelectedStoreId();
     $scope.searchCompleted = false;
     $scope.searchRadius = 10;
@@ -38,23 +37,88 @@
     $scope.searchFailed = false;
     $scope.searchFailedResultCount = 1;
     $scope.pharmacyOnly = false;
-
-    $scope.mapOptions = {
-      center: new google.maps.LatLng(0, 0),
-      zoom: defaultZoom,
-      circle: null,
-      panControl: false,
-      zoomControl: true,
-      zoomControlOptions: {
-        style: google.maps.ZoomControlStyle.LARGE,
-        position: google.maps.ControlPosition.LEFT_CENTER
-      },
-      scaleControl: true,
-      navigationControl: false,
-      streetViewControl: false,
-      //styles: myStyles,
-      mapTypeId: google.maps.MapTypeId.ROADMAP
+    $scope.activated = false;
+    $scope.storeByNumber = {};
+    $scope.vmsl = {
+      myMarkerGrouping: [],
+      activated: false
     };
+
+    gsnStore.getStores().then(function(rsp){
+      var storeList = rsp.response;
+      var storeNumber =  angular.lowercase($location.path()).replace(/\D*/, '');
+      $scope.storeByNumber = gsnApi.mapObject(storeList, "StoreNumber");
+
+      var store = $scope.storeByNumber[storeNumber];
+      if (store){
+        $scope.storeList = [store];
+      }
+      else if (storeNumber.length > 0){
+        gsnApi.goUrl('/404')
+      }
+      else {
+        $scope.storeList = rsp.response;
+      }
+      if ($scope.storeList.length <= 1 && $scope.singleStoreRedirect) {
+        gsnApi.goUrl($scope.singleStoreRedirect + '/' + $scope.storeList[0].StoreNumber)
+      }
+      $scope.showAllStores();
+    });
+
+    gsnStore.getStore().then(function (store) {
+      var show = gsnApi.isNull($location.search().show, '');
+      if (show == 'event') {
+        if (store) {
+          $location.url($scope.decodeServerUrl(store.Redirect));
+        }
+      }
+    });
+
+    function activate() {
+      
+      var gmap = (window.google || {}).maps || {};
+      if ((typeof( gmap.Geocoder ) === 'undefined') 
+        || (typeof( gmap.InfoWindow ) === 'undefined')
+        || (typeof( gmap.Map ) === 'undefined'))
+      {
+        $timeout(activate, 100);
+        if ($scope.loadingScript) return;
+
+        $scope.loadingScript = true;
+        var myCallback = 'dynamic' + new Date().getTime();
+        window[myCallback] = activate;
+
+        // dynamically load google
+        var src = '//maps.googleapis.com/maps/api/js?v=3.exp&sensor=false&libraries=geometry&&callback=' + myCallback;
+        gsnApi.loadScripts(src, activate);
+        return;
+      }
+
+      if (!$scope.vmsl.activated) {
+        $scope.vmsl.activated = true;
+        $scope.mapOptions = {
+          center: new google.maps.LatLng(0, 0),
+          zoom: defaultZoom,
+          circle: null,
+          panControl: false,
+          zoomControl: true,
+          zoomControlOptions: {
+            style: google.maps.ZoomControlStyle.LARGE,
+            position: google.maps.ControlPosition.LEFT_CENTER
+          },
+          scaleControl: true,
+          navigationControl: false,
+          streetViewControl: false,
+          //styles: myStyles,
+          mapTypeId: google.maps.MapTypeId.ROADMAP
+        };
+      }
+    
+      // set default search with query string
+      var search = $location.search;
+      $scope.search.storeLocator = search.search || search.q;
+      $scope.doSearch(true);  
+    }
 
     $scope.openMarkerInfo = function (marker, zoom) {
       $scope.currentMarker = marker;
@@ -126,46 +190,54 @@
           tempMarkers.push($scope.createMarker(data[i]));
         }
       }
+      if (i == 1){
+        $scope.currentMarker = tempMarkers[i];
+      }
 
       if (gsn.isNull($scope.myMap, null) !== null && $scope.myMarkers.length > 0) {
         $scope.fitAllMarkers();
       }
 
       $scope.myMarkers = tempMarkers;
+      $scope.vmsl.myMarkerGrouping = gsnApi.groupBy($scope.myMarkers, 'SortBy');
     };
 
     // find the best zoom to fit all markers
-    $scope.fitAllMarkers = function () {
+    $scope.fitAllMarkers = debounce(function () {
       if (gsnApi.isNull($scope.myMap, null) === null) {
-        $timeout($scope.fitAllMarkers, 500);
         return;
       }
 
-      $timeout(function () {
-        if ($scope.myMarkers.length == 1) {
-          $scope.mapOptions.center = $scope.myMarkers[0].getPosition();
-          $scope.mapOptions.zoom = $scope.defaultZoom || 10;
-          $scope.myMap.setZoom($scope.mapOptions.zoom);
-          $scope.myMap.setCenter($scope.mapOptions.center);
-          return;
-        }
+      if ($scope.myMarkers.length == 1) {
+        $scope.mapOptions.center = $scope.myMarkers[0].getPosition();
+        $scope.mapOptions.zoom = $scope.defaultZoom || 10;
+        $scope.myMap.setZoom($scope.mapOptions.zoom);
+        $scope.myMap.setCenter($scope.mapOptions.center);
+        return;
+      }
 
-        // make sure this is on the UI thread
-        var markers = $scope.myMarkers;
-        var bounds = new google.maps.LatLngBounds();
-        for (var i = 0; i < markers.length; i++) {
-          bounds.extend(markers[i].getPosition());
-        }
+      // make sure this is on the UI thread
+      var markers = $scope.myMarkers;
+      var bounds = new google.maps.LatLngBounds();
+      for (var i = 0; i < markers.length; i++) {
+        bounds.extend(markers[i].getPosition());
+      }
 
-        if ($scope.searchMarker) {
-          bounds.extend($scope.searchMarker.getPosition());
-        }
+      if ($scope.searchMarker) {
+        bounds.extend($scope.searchMarker.getPosition());
+      }
 
-        $scope.myMap.fitBounds(bounds);
-      }, 20);
-    };
+      $scope.myMap.fitBounds(bounds);
+    }, 200);
 
     $scope.showAllStores = function (distanceOrigin) {
+      if (!$scope.mapOptions) {
+        $timeout(function() {
+          $scope.showAllStores(distanceOrigin);
+        }, 500);
+        return;
+      }
+      
       $scope.distanceOrigin = gsnApi.isNull(distanceOrigin, null);
       $scope.mapOptions.zoom = defaultZoom;
       var result = $scope.storeList;
@@ -198,10 +270,11 @@
       }
 
       $scope.initializeMarker(result);
+      $scope.fitAllMarkers();
     };
 
     $scope.canShow = function (store) {
-      return !$scope.pharmacyOnly || $scope.pharmacyOnly && gsnApi.isNull(gsnApi.isNull(store.Settings[21], {}).SettingValue, '').length > 0;
+      return !$scope.pharmacyOnly || ($scope.pharmacyOnly && gsnApi.isNull(store.PharmacyHours, '').length > 0);
     };
 
     $scope.doClear = function () {
@@ -223,6 +296,7 @@
           $scope.setSearchResult(point);
         } else {
 
+          var geocoder = new google.maps.Geocoder();
           geocoder.geocode({ 'address': newValue }, function (results, status) {
             if (status == google.maps.GeocoderStatus.OK) {
               point = new google.maps.LatLng(results[0].geometry.location.lat(), results[0].geometry.location.lng());
@@ -238,20 +312,9 @@
       }
     };
 
-    function activate() {
-      gsnStore.getStore().then(function (store) {
-        var show = gsnApi.isNull($location.search().show, '');
-        if (show == 'event') {
-          if (store) {
-            $location.url($scope.decodeServerUrl(store.Settings[28].SettingValue));
-          }
-        }
-      });
-    }
-
     $scope.viewEvents = function (marker) {
       gsnApi.setSelectedStoreId(marker.location.StoreId);
-      $location.path($scope.decodeServerUrl(marker.location.Settings[28].SettingValue));
+      $location.path($scope.decodeServerUrl(marker.location.Redirect));
     };
 
     $scope.viewSpecials = function (marker) {
@@ -263,7 +326,7 @@
       $scope.gvm.reloadOnStoreSelection = reload;
       gsnApi.setSelectedStoreId(marker.location.StoreId);
       if (gsnApi.isNull($location.search().show, '') == 'event') {
-        $location.url($scope.decodeServerUrl(marker.location.Settings[28].SettingValue));
+        $location.url($scope.decodeServerUrl(marker.location.Redirect));
       }
       else if (gsnApi.isNull($location.search().fromUrl, '').length > 0) {
         $location.url($location.search().fromUrl);
@@ -280,9 +343,9 @@
     // since map must be there and center must be set before markers show up on map
     $scope.$watch('myMap', function (newValue) {
       if (newValue) {
-        if ($scope.storeList) {
+        if ($scope.storeList[0]) {
           newValue.setCenter(new google.maps.LatLng($scope.storeList[0].Latitude, $scope.storeList[0].Longitude), defaultZoom);
-          $scope.initializeMarker(gsnStore.getStoreList());
+          $scope.initializeMarker($scope.storeList);
 
           if (gsnApi.isNull($scope.fromUrl, null) !== null && gsnApi.isNull(gsnApi.getSelectedStoreId(), 0) <= 0) {
             $scope.showIntermission++;
@@ -300,6 +363,8 @@
     });
 
     $scope.$watch('pharmacyOnly', function (event, result) {
+      if (!$scope.activated) return;
+
       var newValue = $scope.search.storeLocator;
       if (gsnApi.isNull(newValue, '').length > 1) {
         $scope.doSearch(true);
@@ -329,6 +394,7 @@
       });
 
       location.zDistance = parseFloat(gsnApi.isNull(location.Distance, 0)).toFixed(2);
+      marker.SortBy = location.SortBy;
 
       return marker;
     };

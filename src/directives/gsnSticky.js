@@ -2,87 +2,63 @@
   'use strict';
   var myModule = angular.module('gsn.core');
 
-  myModule.directive("gsnSticky", ['gsnApi', '$timeout', '$window', function (gsnApi, $timeout, $window) {
-    // Usage: make an element sticky 
-    // 
-    // Creates: 2014-06-13 TomN
-    // 
+  myModule.directive("gsnSticky", ['$window', '$timeout', 'debounce', function ($window, $timeout, debounce) {
+
     var directive = {
-      restrict: 'EA',
-      scope: true,
-      link: link
+      link: link,
+      restrict: 'A',
     };
     return directive;
 
     function link(scope, element, attrs) {
-      var $win = angular.element($window);
-      var myWidth = 0;
-      var offsetTop = gsnApi.isNaN(parseInt(attrs.offsetTop), 20);
-      var timeout = gsnApi.isNaN(parseInt(attrs.timeout), 2000);
+      var anchor = angular.element('<div class="sticky-anchor"></div>');
+      element.before(anchor);
+      element.css( { bottom: 'auto', top: 'auto' } );
 
-      if (attrs.fixedWidth) {
-        if (element.width() > 0) {
-          myWidth = element.width();
-        }
-      }
+      function checkSticky() {
+        var scrollTop = angular.element($window).scrollTop();
+        var screenHeight = angular.element($window).height();
+        var anchorTop = anchor.offset().top;
+        var elementHeight = element.height();
+        var top = parseInt(attrs.top) || 0;
+        var bottom = parseInt(attrs.bottom);
+        var isStuck = false;
+
       
-      // make sure UI is completed before taking first snapshot
-      $timeout(function () {
-        if (scope._stickyElements === undefined) {
-          scope._stickyElements = [];
-
-          $win.bind("scroll", function (e) {
-            var pos = $win.scrollTop();
-            
-            angular.forEach(scope._stickyElements, function(item, k) {
-              var bottom = gsnApi.isNaN(parseInt(attrs.bottom), 0);
-              var top = gsnApi.isNaN(parseInt(attrs.top), 0);
-              
-              // if screen is too small, don't do sticky
-              if ($win.height() < (top + bottom + element.height())) {
-                item.isStuck = true;
-                pos = -1;
-              }
-
-              if (!item.isStuck && pos > (item.start + offsetTop)) {
-                item.element.addClass("stuck");
-                if (myWidth > 0) {
-                  item.element.css({ top: top + 'px', width: myWidth + 'px' });
-                } else {
-                  item.element.css({ top: top + 'px' });
-                }
-
-                item.isStuck = true;
-              } else if (item.isStuck && pos <= item.start) {
-                item.element.removeClass("stuck");
-                item.element.css({ top: null });
-                item.isStuck = false;
-              }
-            });
-          });
-
-          var recheckPositions = function () {
-            for (var i = 0; i < scope._stickyElements.length; i++) {
-              var myItem = scope._stickyElements[i];
-              if (!myItem.isStuck) {
-                myItem.start = myItem.element.offset().top;
-              }
-            }
-          };
-
-          $win.bind("load", recheckPositions);
-          $win.bind("resize", recheckPositions);
+        if (!isNaN(bottom)) {
+          // only sticky to bottom if scroll beyond anchor or it's beyound bottom of screen
+          isStuck = (scrollTop > anchorTop + elementHeight) || (scrollTop + screenHeight < anchorTop + bottom);
+          if (isStuck) {
+            element.css( { bottom: bottom, top: 'auto' } );
+          }
+        } else if (!isNaN(top)) {
+          isStuck = scrollTop > anchorTop + top + elementHeight;
+          if (isStuck) {
+            element.css( { bottom: 'auto', top: top } );
+          }
         }
 
-        var newItem = {
-          element: element,
-          isStuck: false,
-          start: element.offset().top
-        };
+        // if screen is too small, don't do sticky
+        if (screenHeight < (top + (bottom || 0) + elementHeight)) {
+          isStuck = false;
+        }
 
-        scope._stickyElements.push(newItem);
-      }, timeout);
+        if (isStuck) {
+          element.addClass('stuck');
+        } 
+        else {
+          element.css( { bottom: 'auto', top: 'auto' } );
+          element.removeClass('stuck')
+        }
 
+        // probagate
+        return true;
+      }
+
+      var myCheckSticky = debounce(checkSticky, 200);
+
+      angular.element($window).on('scroll', myCheckSticky);
+      scope.$watch(attrs.reloadOnChange, myCheckSticky);
     }
   }]);
 })(angular);

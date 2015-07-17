@@ -8,6 +8,10 @@
     var returnObj = {};
     var myGsn = $window.Gsn.Advertising;
 
+    myGsn.onAllEvents = function(evt){
+      gsn.emit(evt.en, evt.detail);
+    };
+
     myGsn.on('clickRecipe', function (data) {
       $timeout(function () {
         $location.url('/recipe/' + data.detail.RecipeId);
@@ -15,8 +19,6 @@
     });
 
     myGsn.on('clickProduct', function (data) {
-      if (data.type != "gsnevent:clickProduct") return;
-
       $timeout(function () {
         var product = data.detail;
         if (product) {
@@ -35,39 +37,22 @@
     });
 
     myGsn.on('clickLink', function (data) {
-      if (data.type != "gsnevent:clickLink") return;
-
       $timeout(function () {
         var linkData = data.detail;
         if (linkData) {
           var url = gsnApi.isNull(linkData.Url, '');
-          var lowerUrl = angular.lowercase(url);
-          if (lowerUrl.indexOf('recipecenter') > 0) {
-            url = '/recipecenter';
-          }
-
           var target = gsnApi.isNull(linkData.Target, '');
           if (target == '_blank') {
             // this is a link out to open in new window
             // $window.open(url, '');
           } else {
             // assume this is an internal redirect
+            if (url.indexOf('/') < 0) {
+              url = "/" + url;
+            }
+            
             $location.url(url);
           }
-        }
-      });
-    });
-
-    myGsn.on('clickBrickOffer', function (data) {
-      if (data.type != "gsnevent:clickBrickOffer") return;
-
-      $timeout(function () {
-        var linkData = data.detail;
-        if (linkData) {
-          var url = gsnApi.getProfileApiUrl() + '/BrickOffer/' + gsnApi.getProfileId() + '/' + linkData.OfferCode;
-
-          // open brick offer
-          $window.open(url, '');
         }
       });
     });

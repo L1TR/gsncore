@@ -2,11 +2,13 @@
   'use strict';
   var myModule = angular.module('gsn.core');
 
-  var ngModifyElementDirective = function (options) {
-    // Usage: add gsnTitle, gsnMetaViewPort, gsnMetaDescription, gsnMetaKeywords, gsnMetaAuthor, gsnMetaGoogleSiteVerification
+  var ngModifyElementDirective = function (opt) {
+    // Usage: add meta dynamically
     // 
     // Creates: 2013-12-12 TomN
-    // 
+    // 2014-06-22 TomN - fix global variable
+    var options = angular.copy(opt);
+
     return myModule.directive(options.name, [
       function () {
         return {
@@ -39,6 +41,10 @@
             scope[modifierName] = currentModifier;
 
             var $element = angular.element(options.selector);
+            if ($element.length <= 0 && typeof(options.html) == 'string') {
+              $element = angular.element(options.html)
+              angular.element('head')[0].appendChild($element[0]);
+            }
 
             // Keep track of the original value, so that it
             // can be restored later.
@@ -135,6 +141,7 @@
   ngModifyElementDirective({
     name: 'gsnMetaGoogleSiteVerification',
     selector: 'meta[name="google-site-verification"]',
+    html: '<meta name="google-site-verification" content="" />',
     get: function (e) {
       return e.attr('content');
     },
@@ -143,22 +150,12 @@
     }
   });
 
-  ngModifyElementDirective({
-    name: 'gsnFavIcon',
-    selector: 'link[rel="shortcut icon"]',
-    get: function (e) {
-      return e.attr('href');
-    },
-    set: function (e, v) {
-      return e.attr('href', v);
-    }
-  });
-
   // Facebook OpenGraph integration
   //  og:title - The title of your object as it should appear within the graph, e.g., "The Rock". 
   ngModifyElementDirective({
     name: 'gsnOgTitle',
     selector: 'meta[name="og:title"]',
+    html: '<meta name="og:title" content="" />',
     get: function (e) {
       return e.attr('content');
     },
@@ -171,6 +168,7 @@
   ngModifyElementDirective({
     name: 'gsnOgType',
     selector: 'meta[name="og:type"]',
+    html: '<meta name="og:type" content="" />',
     get: function (e) {
       return e.attr('content');
     },
@@ -183,6 +181,7 @@
   ngModifyElementDirective({
     name: 'gsnOgImage',
     selector: 'meta[name="og:image"]',
+    html: '<meta name="og:image" content="" />',
     get: function (e) {
       return e.attr('content');
     },
@@ -195,6 +194,7 @@
   ngModifyElementDirective({
     name: 'gsnOgUrl',
     selector: 'meta[name="og:url"]',
+    html: '<meta name="og:url" content="" />',
     get: function (e) {
       return e.attr('content');
     },
@@ -202,34 +202,12 @@
       return e.attr('content', v);
     }
   });
-  
-  // og:site_name - A human-readable name for your site, e.g., "IMDb" 
+
+  // og:description - the description.
   ngModifyElementDirective({
-    name: 'gsnOgSiteName',
-    selector: 'meta[name="og:site_name"]',
-    get: function (e) {
-      return e.attr('content');
-    },
-    set: function (e, v) {
-      return e.attr('content', v);
-    }
-  });
-  
-  // fb:admins or fb:app_id - A comma-separated list of either Facebook user IDs or a Facebook Platform application ID that administers this page.
-  ngModifyElementDirective({
-    name: 'gsnFbAdmins',
-    selector: 'meta[name="fb:admins"]',
-    get: function (e) {
-      return e.attr('content');
-    },
-    set: function (e, v) {
-      return e.attr('content', v);
-    }
-  });
-  
-  ngModifyElementDirective({
-    name: 'gsnFbAppId',
-    selector: 'meta[name="fb:app_id"]',
+    name: 'gsnOgDescription',
+    selector: 'meta[name="og:description"]',
+    html: '<meta name="og:description" content="" />',
     get: function (e) {
       return e.attr('content');
     },

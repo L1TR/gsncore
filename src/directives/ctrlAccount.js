@@ -4,7 +4,7 @@
   var myDirectiveName = 'ctrlAccount';
   
   angular.module('gsn.core')
-    .controller(myDirectiveName, ['$scope', 'gsnProfile', 'gsnApi', '$timeout', 'gsnStore', '$rootScope', myController])
+    .controller(myDirectiveName, ['$scope', 'gsnProfile', 'gsnApi', '$timeout', 'gsnStore', '$rootScope', '$analytics', myController])
     .directive(myDirectiveName, myDirective);
 
   function myDirective() {
@@ -17,7 +17,7 @@
     return directive;
   }
   
-  function myController($scope, gsnProfile, gsnApi, $timeout, gsnStore, $rootScope) {
+  function myController($scope, gsnProfile, gsnApi, $timeout, gsnStore, $rootScope, $analytics) {
     $scope.activate = activate;
     $scope.profile = { PrimaryStoreId: gsnApi.getSelectedStoreId(), ReceiveEmail: true };
 
@@ -45,7 +45,8 @@
     }
 
     $scope.updateProfile = function () {
-      var profile = $scope.profile;
+      $scope.$broadcast("autofill:update");
+	    var profile = $scope.profile;
       if ($scope.myForm.$valid) {
 
         // prevent double submit
@@ -59,12 +60,13 @@
               $scope.isValidSubmit = result.success;
               if (result.success) {
                 gsnApi.setSelectedStoreId(profile.PrimaryStoreId);
-
                 // trigger profile retrieval
                 gsnProfile.getProfile(true);
 
                 // Broadcast the update.
                 $rootScope.$broadcast('gsnevent:updateprofile-successful', result);
+                $analytics.eventTrack('profile-update', { category: 'profile', label: result.response.ReceiveEmail });
+                $rootScope.$win.gmodal.emit('gsnevent:updateprofile-successful', result);
 
                 // If we have the cituation where we do not want to navigate.
                 if (!$scope.disableNavigation) {

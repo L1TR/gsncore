@@ -24,20 +24,26 @@
     $scope.loadAll = $scope.loadAll || false;
     $scope.itemsPerPage = $scope.itemsPerPage || 10;
     $scope.sortBy = $scope.sortBy || 'CategoryName';
-    $scope.sortByName = $scope.sortByName || 'department';
+    $scope.sortByName = $scope.sortByName || 'Department';
     $scope.actualSortBy = $scope.sortBy;
 
     $scope.allItems = [];
     $scope.loadMore = loadMore;
-    $scope.vm = { cacheItems: [], digitalCirc: null };
+    $scope.vm = { cacheItems: [], 
+      digitalCirc: null, 
+      filterBy: $location.search().q, 
+      filter: {}, 
+      pageIdx: $location.search().p, 
+      circIdx: $location.search().c };
 
     function activate() {
       
       var config = gsnApi.getConfig();
       if ($scope.currentPath == '/circular' && (gsnApi.isNull(config.defaultMobileListView, null) === null)) {
         config.defaultMobileListView = true;
-        if (gsnApi.browser.isMobile && gsnApi.getThemeConfig('default-mobile-listview')) {
-          gsnApi.goUrl('/circular/list');
+        var mobileListViewUrl = gsnApi.getThemeConfigDescription('default-mobile-listview');
+        if (gsnApi.browser.isMobile && mobileListViewUrl) {
+          gsnApi.goUrl(mobileListViewUrl);
           return;
         }
       }
@@ -51,9 +57,17 @@
         if (data.Circulars.length <= 0) {
           return;
         }
+        
+        if (data.Circulars.length == 1) {
+          if (gsnApi.isNull($scope.vm.circIdx, null) === null) {
+            $scope.vm.circIdx = 1;
+            $scope.vm.pageIdx = 1;
+          }
+        }
 
         $scope.doSearchInternal();
         $scope.vm.digitalCirc = data;
+        setPage();
       }
     }
 
@@ -67,6 +81,7 @@
         }
 
         $scope.vm.selectedItem = item;
+        $scope.gvm.selectedItem = item;
       }
     };
 
@@ -105,19 +120,30 @@
     });
 
     $scope.doSearchInternal = function () {
-      var circularPage = gsnStore.getCircular($scope.pageId);
+      var circularType = gsnStore.getCircular($scope.pageId);
       var list = gsnProfile.getShoppingList();
 
       // don't show circular until data and list are both loaded
-      if (gsnApi.isNull(circularPage, null) === null || gsnApi.isNull(list, null) === null) return;
+      if (gsnApi.isNull(circularType, null) === null || gsnApi.isNull(list, null) === null) return;
 
-      var result = $filter('orderBy')($filter('filter')(circularPage.items, $scope.vm.filterBy || ''), $scope.actualSortBy);
+      var result1 = $filter('filter')(circularType.items, $scope.vm.filter);
+      var result = $filter('orderBy')($filter('filter')(result1, $scope.vm.filterBy || ''), $scope.actualSortBy);
+      if (!$scope.vm.circularType) {
+        $scope.vm.circularType = circularType;
+        $scope.vm.categories = gsnApi.groupBy(circularType.items, 'CategoryName');
+        $scope.vm.brands = gsnApi.groupBy(circularType.items, 'BrandName');
+      }
+      
       $scope.vm.cacheItems = result;
       $scope.allItems = [];
       loadMore();
     };
 
     $scope.$watch('vm.filterBy', $scope.doSearchInternal);
+    $scope.$watch('vm.filter.BrandName', $scope.doSearchInternal);
+    $scope.$watch('vm.filter.CategoryName', $scope.doSearchInternal);
+    $scope.$watch('vm.pageIdx', setPage);
+    $scope.$watch('vm.circIdx', setPage);
 
     $scope.$on('gsnevent:circular-loaded', function (event, data) {
       if (data.success) {
@@ -129,7 +155,26 @@
     });
     
     $timeout(activate, 50);
-    //#region Internal Methods        
+    //#region Internal Methods   
+    function sortMe(a, b){
+      if (a.rect.x <= b.rect.x) return a.rect.y - b.rect.y;
+      return a.rect.x - b.rect.x;
+    }
+
+    function setPage() {
+      if (!$scope.vm.digitalCirc) return;
+      if (!$scope.vm.digitalCirc.Circulars) return;
+      if ($scope.vm.digitalCirc.Circulars.length <= 0) return;
+      
+      $scope.vm.circular = $scope.vm.digitalCirc.Circulars[$scope.vm.circIdx - 1];
+      if ($scope.vm.circular){
+        $scope.vm.page = $scope.vm.circular.Pages[$scope.vm.pageIdx - 1];
+        if (!$scope.vm.page.sorted) {
+          $scope.vm.page.Items.sort(sortMe);
+          $scope.vm.page.sorted = true;
+        }
+      }
+    }    
 
     function loadMore() {
       var items = $scope.vm.cacheItems || [];

@@ -3,12 +3,14 @@
   'use strict';
   var myModule = angular.module('gsn.core');
 
-  // $notication
+  /**
+   * allow for cross platform notification
+   */
   myModule.service('$notification', ['$rootScope', '$window', function ($rootScope, $window) {
     var service = {
       alert: function (message) {
         if (!$window.isPhoneGap) {
-          $window.alert(message);
+          gmodal.show({content: '<div class="myModalForm modal" style="display: block"><div class="modal-dialog"><div class="modal-content"><div class="modal-body">' + message + '<br /><br/><button class="btn btn-default close pull-right" style="width: 80px">OK</button><br /></div></div></div></div>', hideOn: "click,esc,tap"})
           return;
         }
 
@@ -59,10 +61,26 @@
     };
 
     return service;
+  }]);
 
-    //#region Internal Methods        
-
-    //#endregion
+  // debounce: for performance
+  myModule.factory('debounce', ['$timeout', function($timeout) {
+    // The service is actually this function, which we call with the func
+    // that should be debounced and how long to wait in between calls
+    return function debounce(func, wait, immediate) {
+      var timeout;
+      return function() {
+        var context = this, args = arguments;
+        var later = function() {
+          timeout = null;
+          if (!immediate) func.apply(context, args);
+        };
+        var callNow = immediate && !timeout;
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+        if (callNow) func.apply(context, args);
+      };
+    };
   }]);
 
   // FeedService: google feed
@@ -100,6 +118,9 @@
     //#endregion
   }]);
 
+  /**
+   * Detect display mode
+   */
   myModule.directive('bsDisplayMode', ['$window', '$timeout', function ($window, $timeout) {
     return {
       template: '<div class="visible-xs"></div><div class="visible-sm"></div><div class="visible-md"></div><div class="visible-lg"></div>',
@@ -126,7 +147,28 @@
     };
   }]);
 
-  myModule.directive('ngScrollTop', ['$window', '$timeout', function ($window, $timeout) {
+  /**
+   * bind scrollTo event on click
+   */
+  myModule.directive('scrollTo', ['$location', function ($location) {
+    return function(scope, element, attrs) {
+
+      element.bind('click', function(event) {
+          event.stopPropagation();
+          var off = scope.$on('$locationChangeStart', function(ev) {
+              off();
+              ev.preventDefault();
+          });
+          var location = attrs.scrollTo;
+          $location.hash(location);
+      });
+    };
+  }]);
+
+  /**
+   * create scrollTop marker
+   */
+  myModule.directive('ngScrollTop', ['$window', '$timeout', 'debounce', function ($window, $timeout, debounce) {
     var directive = {
       link: link,
       restrict: 'A',
@@ -139,20 +181,12 @@
     
     function link(scope, element, attrs) {
       countScrollTop++;
-      var scrollTop = parseInt(angular.element($window).scrollTop());
-      scope[attrs.ngScrollTop] = scrollTop;
+      var myScrollTop = debounce(function () {
+        scope.scrollTop = angular.element($window).scrollTop();
+        element.css({ 'display': ((scope.scrollTop > parseInt(attrs.offset)) && countScrollTop == 1) ? 'block' : '' });
+      }, 300);
       
-      angular.element($window).on('scroll', function () {
-        
-        $timeout(function () {
-          // else use timeout to overcome scope apply
-          scrollTop = parseInt(angular.element($window).scrollTop());
-          scope[attrs.ngScrollTop] = scrollTop;
-
-          element.css({ 'display': ((scrollTop > parseInt(attrs.offset)) && countScrollTop == 1) ? 'block' : '' });
-        }, 300);
-      });
-
+      angular.element($window).on('scroll', myScrollTop);
       element.on('click', function () {
         angular.element($window).scrollTop(0);
       });
@@ -162,5 +196,19 @@
       });
     }
   }]);
+
+  /**
+   * stop event probagation
+   */
+  myModule.directive('stopEvent', function () {
+    return {
+        restrict: 'A',
+        link: function (scope, element, attr) {
+            element.bind(attr.stopEvent, function (e) {
+                e.stopPropagation();
+            });
+        }
+    };
+  });
 
 })(angular);

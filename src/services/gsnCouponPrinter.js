@@ -1,13 +1,16 @@
 (function (angular, undefined) {
   'use strict';
   var serviceId = 'gsnCouponPrinter';
-  angular.module('gsn.core').service(serviceId, ['$rootScope', 'gsnApi', '$log', '$timeout', 'gsnStore', gsnCouponPrinter]);
+  angular.module('gsn.core').service(serviceId, ['$rootScope', 'gsnApi', '$log', '$timeout', 'gsnStore', 'gsnProfile', '$window', gsnCouponPrinter]);
 
-  function gsnCouponPrinter($rootScope, gsnApi, $log, $timeout, gsnStore) {
+  function gsnCouponPrinter($rootScope, gsnApi, $log, $timeout, gsnStore, gsnProfile, $window) {
     var service = {
       print: print,
-      init: gcprinter.init,
-      activated: false
+      init: init,
+      loadingScript: false,
+      isScriptReady: false,
+      activated: false,
+      retries: 0
     };
     var couponClasses = [];
     var coupons = [];
@@ -17,10 +20,18 @@
     return service;
 
     function activate() {
-      // wait until gcprinter is available
       if (typeof(gcprinter) == 'undefined') {
         $log.log('waiting for gcprinter...');
-        $timeout(activate, 100);
+        $timeout(activate, 500);
+
+        if (service.loadingScript) return;
+
+        service.loadingScript = true;
+
+        // dynamically load google
+        var src = '//cdn.gsngrocers.com/script/gcprinter/gcprinter.min.js';
+
+        gsnApi.loadScripts([src], activate);
         return;
       }
 
@@ -60,7 +71,35 @@
           $rootScope.$broadcast('gsnevent:gcprinter-printfail', rsp);
         }, 5);
       });
+
+     // keep trying to init until ready
+      gcprinter.on('initcomplete', function() {
+        service.isScriptReady = true;
+        init();
+        $rootScope.$broadcast('gsnevent:gcprinter-initcomplete');
+      });
       return;
+    }
+
+    function init() {
+      if (typeof(gcprinter) === 'undefined') {
+        $timeout(init, 500);
+        return;
+      }
+
+      if (!service.isScriptReady) {
+        gcprinter.init();
+        return;
+      }
+
+      if (!gcprinter.hasPlugin()){
+        detectPluginWithWebSocket(function() {
+          $timeout(printInternal, 5);
+        });
+      }
+      else {
+        $timeout(printInternal, 5);
+      }
     }
 
     function print(items) {
@@ -72,13 +111,15 @@
       couponClasses.length = 0;
       angular.forEach(items, function (v, k) {
         var item = v;
-        if (gsnApi.isNull(v.ProductCode, null) == null)
-        {
-          item = gsnStore.getCoupon(v.ItemId, v.ItemTypeId);
+        if (item) {
+          if (gsnApi.isNull(v.ProductCode, null) == null)
+          {
+            item = gsnStore.getCoupon(v.ItemId, v.ItemTypeId);
+          }
+          
+          couponClasses.push('.coupon-message-' + item.ProductCode);
+          coupons.push(item.ProductCode);
         }
-        
-        couponClasses.push('.coupon-message-' + v.ProductCode);
-        coupons.push(v.ProductCode);
       });
 
       $timeout(function () {
@@ -88,18 +129,25 @@
       if (!gcprinter.isReady) {
         // keep trying to init until ready
         gcprinter.on('initcomplete', function() {
-          $timeout(printInternal, 5);
+          if (!gcprinter.hasPlugin()){
+            detectPluginWithWebSocket(function() {
+              $timeout(printInternal, 5);
+              $rootScope.$broadcast('gsnevent:gcprinter-initcomplete');
+            });
+          }
+          else {
+            $timeout(printInternal, 5);
+            $rootScope.$broadcast('gsnevent:gcprinter-initcomplete');
+          }
         });
         gcprinter.init();
         return;
       }
-      else {
-        $timeout(printInternal, 5);
-      }
+
+      $timeout(printInternal, 5);
     };
 
     function printInternal() {
-      var siteId = gsnApi.getChainId();
       if (!gcprinter.hasPlugin()) {
         $rootScope.$broadcast('gsnevent:gcprinter-not-found');
       }
@@ -109,9 +157,24 @@
       else if (!gcprinter.isPrinterSupported()) {
         $rootScope.$broadcast('gsnevent:gcprinter-not-supported');
       }
-      else {
+      else if (coupons.length > 0){
+        var siteId = gsnApi.getChainId();
+        angular.forEach(coupons, function (v) {
+          gsnProfile.addPrinted(v);
+        });
         gcprinter.print(siteId, coupons);
       }
     };
+		
+	function detectPluginWithWebSocket(cb) {
+	  var socket = new WebSocket("ws://localhost:26876");
+      socket.onopen = cb;
+      socket.onerror = function (error) {
+        service.retries++;
+        if (service.retries > 4) return;
+
+		    setTimeout(detectPluginWithWebSocket, 1000);
+      };
+	  };
   }
 })(angular);

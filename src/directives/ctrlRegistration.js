@@ -4,7 +4,7 @@
   var myDirectiveName = 'ctrlRegistration';
 
   angular.module('gsn.core')
-    .controller(myDirectiveName, ['$scope', 'gsnProfile', 'gsnApi', '$timeout', 'gsnStore', '$interpolate', '$http', '$rootScope', '$window', '$location', myController])
+    .controller(myDirectiveName, ['$scope', 'gsnProfile', 'gsnApi', '$timeout', 'gsnStore', '$interpolate', '$http', '$rootScope', '$window', '$location', '$analytics', myController])
     .directive(myDirectiveName, myDirective);
 
   function myDirective() {
@@ -17,7 +17,7 @@
     return directive;
   }
 
-  function myController($scope, gsnProfile, gsnApi, $timeout, gsnStore, $interpolate, $http, $rootScope, $window, $location) {
+  function myController($scope, gsnProfile, gsnApi, $timeout, gsnStore, $interpolate, $http, $rootScope, $window, $location, $analytics) {
     $scope.activate = activate;
     $scope.totalSavings = '';
     $scope.profile = { PrimaryStoreId: gsnApi.getSelectedStoreId(), ReceiveEmail: true };
@@ -29,15 +29,18 @@
     $scope.errorMessage = '';
     var template;
     var templateUrl = $scope.isFacebook ? '/views/email/registration-facebook.html' : '/views/email/registration.html';
-    if (gsnApi.getThemeConfigDescription('registration-custom-email', false)) {
-      templateUrl = $scope.getThemeUrl(templateUrl);
-    } else {
-      templateUrl = $scope.getContentUrl(templateUrl);
-    }
+    var myTemplateUrl = $scope.getContentUrl(templateUrl);
 
-    $http.get(templateUrl)
+    // try get template from content, if fail, get it from theme
+    $http.get(myTemplateUrl)
       .success(function (response) {
         template = response.replace(/data-ctrl-email-preview/gi, '');
+      }).error(function(response) {
+        myTemplateUrl = $scope.getThemeUrl(templateUrl);
+        $http.get(myTemplateUrl)
+          .success(function (response) {
+            template = response.replace(/data-ctrl-email-preview/gi, '');
+          });
       });
 
     function activate() {
@@ -66,6 +69,7 @@
     }
 
     $scope.registerProfile = function () {
+	  $scope.$broadcast("autofill:update");
       var payload = angular.copy($scope.profile);
       if ($scope.myForm.$valid) {
 
@@ -99,6 +103,8 @@
                 $scope.isSubmitting = true;
 
                 $rootScope.$broadcast('gsnevent:registration-successful', result);
+                $analytics.eventTrack('profile-register', { category: 'registration', label: result.response.ReceiveEmail });
+                $rootScope.$win.gmodal.emit('gsnevent:registration-successful', result);
 
                 // since we have the password, automatically login the user
                 if ($scope.isFacebook) {

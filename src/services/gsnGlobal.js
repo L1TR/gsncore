@@ -20,14 +20,25 @@ angular.module('gsn.core').service(serviceId, ['$window', '$location', '$timeout
       returnObj.hasInit = true;
 
 
-      if (initProfile)
+      if (initProfile) {
         gsnProfile.initialize();
+      }
 
+      gsnApi.gsn.$rootScope = $rootScope
       $scope = $scope || $rootScope;
       $scope.defaultLayout = $scope.defaultLayout || gsnApi.getThemeUrl('/views/layout.html');
       $scope.currentLayout = $scope.defaultLayout;
       $scope.currentPath = '/';
-      $scope.gvm = { loginCounter: 0, menuInactive: false, shoppingListActive: false, profile: {}, noCircular: true, reloadOnStoreSelection: false };
+      $scope.gvm = { 
+        loginCounter: 0, 
+        menuInactive: false, 
+        shoppingListActive: false, 
+        profile: {}, 
+        noCircular: true, 
+        reloadOnStoreSelection: false, 
+        currentStore: {},
+        adsCollapsed: false
+      };
       $scope.youtech = gsnYoutech;
       $scope.search = { site: '', item: '' };
       $scope.facebookReady = false;
@@ -42,8 +53,9 @@ angular.module('gsn.core').service(serviceId, ['$window', '$location', '$timeout
       $scope.goUrl = gsnApi.goUrl;
       $scope.encodeURIComponent = encodeURIComponent;
       $scope.isOnList = gsnProfile.isOnList;
-      $scope.printScriptUrl = gsnApi.getApiUrl() + '/ShoppingList/CouponInitScriptFromBrowser/' + gsnApi.getChainId() + '?callbackFunc=showResultOfDetectControl';
       $scope.getShoppingListCount = gsnProfile.getShoppingListCount;
+      $scope.$win = $window;
+      $scope._tk = $window._tk;
 
       $scope.validateRegistration = function (rsp) {
         // attempt to authenticate user with facebook
@@ -127,7 +139,7 @@ angular.module('gsn.core').service(serviceId, ['$window', '$location', '$timeout
         }
       };
 
-      $scope.logoutWithPromt = function () {
+      $scope.logoutWithPrompt = function () {
         try {
           $scope.goOutPromt(null, '/', $scope.logout, true);
         } catch (e) {
@@ -135,6 +147,8 @@ angular.module('gsn.core').service(serviceId, ['$window', '$location', '$timeout
         }
 
       };
+
+      $scope.logoutWithPromt = $scope.logoutWithPrompt;
 
       $scope.doToggleCartItem = function (evt, item, linkedItem) {
         /// <summary>Toggle the shoping list item checked state</summary>
@@ -155,10 +169,21 @@ angular.module('gsn.core').service(serviceId, ['$window', '$location', '$timeout
           }
 
           gsnProfile.addItem(item);
+
+          if (item.ItemTypeId == 8) {
+            
+            if (gsnApi.isNull(item.Varieties, null) === null) {
+              item.Varieties = [];
+            }
+
+            $scope.gvm.selectedItem = item;
+          }
         }
 
         $rootScope.$broadcast('gsnevent:shoppinglist-toggle-item', item);
       };
+
+      // events handling
 
       $scope.$on('$routeChangeStart', function (evt, next, current) {
         /// <summary>Listen to route change</summary>
@@ -168,6 +193,7 @@ angular.module('gsn.core').service(serviceId, ['$window', '$location', '$timeout
 
         // store the new route location
         $scope.currentPath = angular.lowercase(gsnApi.isNull($location.path(), ''));
+        $scope.friendlyPath = $scope.currentPath.replace('/', '').replace(/\/+/gi, '-');
         $scope.gvm.menuInactive = false;
         $scope.gvm.shoppingListActive = false;
 
@@ -188,6 +214,8 @@ angular.module('gsn.core').service(serviceId, ['$window', '$location', '$timeout
         if (gsnApi.isNull(next.layout, '').length > 0) {
           $scope.currentLayout = next.layout;
         }
+        
+        $scope.gvm.selectedItem = null;
       });
 
       $scope.$on('gsnevent:profile-load-success', function (event, result) {
@@ -222,6 +250,7 @@ angular.module('gsn.core').service(serviceId, ['$window', '$location', '$timeout
       $scope.$on('gsnevent:store-setid', function (event, result) {
         gsnStore.getStore().then(function (store) {
           $analytics.eventTrack('StoreSelected', { category: store.StoreName, label: store.StoreNumber + '', value: store.StoreId });
+          $scope.gvm.currentStore = store;
 
           gsnProfile.getProfile().then(function (rst) {
             if (rst.success) {
@@ -245,20 +274,29 @@ angular.module('gsn.core').service(serviceId, ['$window', '$location', '$timeout
         $scope.gvm.noCircular = !data.success;
       });
 
-      $scope.$watch(function () {
-        return Facebook.isReady(); // This is for convenience, to notify if Facebook is loaded and ready to go.
-      }, function (newVal) {
-        $scope.facebookReady = true; // You might want to use this to disable/show/hide buttons and else
+      // trigger facebook init if there is appId
+      if (typeof(Facebook.isReady) !== 'undefined' && gsnApi.getConfig().FacebookAppId) {
+        $scope.$watch(function () {
+          return Facebook.isReady(); // This is for convenience, to notify if Facebook is loaded and ready to go.
+        }, function (newVal) {
+          $scope.facebookReady = true; // You might want to use this to disable/show/hide buttons and else
 
-        if (gsnApi.isLoggedIn()) return;
+          if (gsnApi.isLoggedIn()) return;
 
-        // attempt to auto login facebook user
-        Facebook.getLoginStatus(function (response) {
-          // only auto login for connected status
-          if (response.status == 'connected') {
-            $scope.validateRegistration(response);
-          }
+          // attempt to auto login facebook user
+          Facebook.getLoginStatus(function (response) {
+            // only auto login for connected status
+            if (response.status == 'connected') {
+              $scope.validateRegistration(response);
+            }
+          });
         });
+      }
+
+      $scope.$on('gsnevent:closemodal', function(){ 
+        if (typeof gmodal !== 'undefined') {
+          gmodal.hide();
+        }
       });
 
       //#region analytics

@@ -6,11 +6,13 @@
   function gsnProfile($rootScope, $http, gsnApi, $q, gsnList, gsnStore, $location, $timeout, $sessionStorage, $localStorage, gsnRoundyProfile) {
     var returnObj = {},
         previousProfileId = gsnApi.getProfileId(),
+        couponStorage = $sessionStorage,
         $profileDefer = null,
         $creatingDefer = null;
     var $savedData = { allShoppingLists: {}, profile: null, profileData: { scoredProducts: {}, circularItems: {}, availableCoupons: {}, myPantry: {} } };
 
     $rootScope[serviceId] = returnObj;
+    gsnApi.gsn.$profile = returnObj;
     returnObj.getShoppingListId = gsnApi.getShoppingListId;
 
     returnObj.getProfileId = gsnApi.getProfileId;
@@ -80,9 +82,9 @@
     // it should reset shopping list
     returnObj.logOut = function () {
       gsnApi.logOut();
-      $localStorage.clipped = [];
-      $localStorage.printed = [];
-      $localStorage.preClipped = {};
+      couponStorage.clipped = [];
+      couponStorage.printed = [];
+      couponStorage.preClipped = {};
     };
 
     // proxy method to add item to current shopping list
@@ -94,6 +96,7 @@
         }
 
         shoppingList.addItem(item);
+        gsn.emit('AddItem', item);
       }
     };
 
@@ -120,6 +123,8 @@
       var shoppingList = returnObj.getShoppingList();
       if (shoppingList) {
         shoppingList.removeItem(item);
+
+        gsn.emit('RemoveItem', item);
       }
     };
 
@@ -347,52 +352,52 @@
 
     returnObj.getMyCircularItems = function () {
       var url = gsnApi.getProfileApiUrl() + '/GetCircularItems/' + gsnApi.getProfileId();
-      return gsnApi.httpGetOrPostWithCache($savedData.profileData.circularItems, url);
+      return gsnApi.http($savedData.profileData.circularItems, url);
     };
 
     returnObj.getMyPantry = function (departmentId, categoryId) {
       var url = gsnApi.getProfileApiUrl() + '/GetPantry/' + gsnApi.getProfileId() + '?' + 'departmentId=' + gsnApi.isNull(departmentId, '') + '&categoryId=' + gsnApi.isNull(categoryId, '');
-      return gsnApi.httpGetOrPostWithCache($savedData.profileData.myPantry, url);
+      return gsnApi.http($savedData.profileData.myPantry, url);
     };
 
     returnObj.getMyProducts = function () {
       var url = gsnApi.getProfileApiUrl() + '/GetScoredProducts/' + gsnApi.getProfileId();
-      return gsnApi.httpGetOrPostWithCache($savedData.profileData.scoredProducts, url);
+      return gsnApi.http($savedData.profileData.scoredProducts, url);
     };
 
     returnObj.getMyRecipes = function () {
       var url = gsnApi.getProfileApiUrl() + '/GetSavedRecipes/' + gsnApi.getProfileId();
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.rateRecipe = function (recipeId, rating) {
       var url = gsnApi.getProfileApiUrl() + '/RateRecipe/' + recipeId + '/' + gsnApi.getProfileId() + '/' + rating;
-      return gsnApi.httpGetOrPostWithCache({}, url, {});
+      return gsnApi.http({}, url, {});
     };
 
     returnObj.getMyRecipe = function (recipeId) {
       var url = gsnApi.getProfileApiUrl() + '/GetSavedRecipe/' + gsnApi.getProfileId() + '/' + recipeId;
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.saveRecipe = function (recipeId, comment) {
       var url = gsnApi.getProfileApiUrl() + '/SaveRecipe/' + recipeId + '/' + gsnApi.getProfileId() + '?comment=' + encodeURIComponent(comment);
-      return gsnApi.httpGetOrPostWithCache({}, url, {});
+      return gsnApi.http({}, url, {});
     };
 
     returnObj.saveProduct = function (productId, comment) {
       var url = gsnApi.getProfileApiUrl() + '/SaveProduct/' + productId + '/' + gsnApi.getProfileId() + '?comment=' + encodeURIComponent(comment);
-      return gsnApi.httpGetOrPostWithCache({}, url, {});
+      return gsnApi.http({}, url, {});
     };
 
     returnObj.selectStore = function (storeId) {
       var url = gsnApi.getProfileApiUrl() + '/SelectStore/' + gsnApi.getProfileId() + '/' + storeId;
-      return gsnApi.httpGetOrPostWithCache({}, url, {});
+      return gsnApi.http({}, url, {});
     };
 
     returnObj.getCampaign = function () {
       var url = gsnApi.getProfileApiUrl() + '/GetCampaign/' + gsnApi.getProfileId();
-      return gsnApi.httpGetOrPostWithCache({}, url);
+      return gsnApi.http({}, url);
     };
 
     returnObj.resetCampaign = function () {
@@ -448,38 +453,38 @@
     };
 
     returnObj.clipCoupon = function(productCode) {
-      if (!$localStorage.clipped)
-        $localStorage.clipped = [];
-      if ($localStorage.clipped.indexOf(productCode) < 0)
-        $localStorage.clipped.push(productCode);
+      if (!couponStorage.clipped)
+        couponStorage.clipped = [];
+      if (couponStorage.clipped.indexOf(productCode) < 0)
+        couponStorage.clipped.push(productCode);
     };
 
     returnObj.unclipCoupon = function(productCode) {
-      var index = $localStorage.clipped.indexOf(productCode);
-      $localStorage.clipped.splice(index, 1);
+      var index = couponStorage.clipped.indexOf(productCode);
+      couponStorage.clipped.splice(index, 1);
     };
 
     returnObj.getClippedCoupons = function() {
-      return $localStorage.clipped;
+      return couponStorage.clipped;
     };
 
     returnObj.savePreclippedCoupon = function (item) {
-      $localStorage.preClipped = item;
+      couponStorage.preClipped = item;
     };
 
     returnObj.getPreclippedCoupon = function() {
-      return $localStorage.preClipped;
+      return couponStorage.preClipped;
     };
     
     returnObj.addPrinted = function (productCode) {
-      if (!$localStorage.printed)
-        $localStorage.printed = [];
-      if ($localStorage.printed.indexOf(productCode) < 0)
-        $localStorage.printed.push(productCode);
+      if (!couponStorage.printed)
+        couponStorage.printed = [];
+      if (couponStorage.printed.indexOf(productCode) < 0)
+        couponStorage.printed.push(productCode);
     };
 
     returnObj.getPrintedCoupons = function () {
-      return $localStorage.printed;
+      return couponStorage.printed;
     };
 
     //#region Events Handling

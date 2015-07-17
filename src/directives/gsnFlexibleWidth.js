@@ -2,7 +2,11 @@
   'use strict';
   var myModule = angular.module('gsn.core');
 
-  myModule.directive('gsnFlexibleWidth', [function () {
+  /**
+   * allow width to be flexible
+   * initially created for Roundy coupons bottom panel
+   */
+  myModule.directive('gsnFlexibleWidth', ['debounce', '$window', function (debounce, $window) {
     var directive = {
       restrict: 'EA',
       scope: true,
@@ -17,8 +21,9 @@
         });
       }
 
-      updateWidth();
-      $(window).resize(updateWidth);
+      var myUpdateWith = debounce(updateWidth, 200);
+      angular.element($window).on('resize', myUpdateWith);
+      myUpdateWith();
     }
   }]);
 })(angular);
